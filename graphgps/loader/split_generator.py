@@ -50,7 +50,7 @@ def setup_standard_split(dataset):
 
     if task_level == 'node':
         for split_name in 'train_mask', 'val_mask', 'test_mask':
-            mask = getattr(dataset.data, split_name, None)
+            mask = getattr(dataset._data, split_name, None)
             # Check if the train/val/test split mask is available
             if mask is None:
                 raise ValueError(f"Missing '{split_name}' for standard split")
@@ -69,7 +69,7 @@ def setup_standard_split(dataset):
 
     elif task_level == 'graph':
         for split_name in 'train_graph_index', 'val_graph_index', 'test_graph_index':
-            if not hasattr(dataset.data, split_name):
+            if not hasattr(dataset._data, split_name):
                 raise ValueError(f"Missing '{split_name}' for standard split")
         if split_index != 0:
             raise NotImplementedError(f"Multiple standard splits not supported "
@@ -77,7 +77,7 @@ def setup_standard_split(dataset):
 
     elif task_level == 'link_pred':
         for split_name in 'train_edge_index', 'val_edge_index', 'test_edge_index':
-            if not hasattr(dataset.data, split_name):
+            if not hasattr(dataset._data, split_name):
                 raise ValueError(f"Missing '{split_name}' for standard split")
         if split_index != 0:
             raise NotImplementedError(f"Multiple standard splits not supported "
@@ -114,7 +114,7 @@ def setup_random_split(dataset):
         ShuffleSplit(
             train_size=split_ratios[0],
             random_state=cfg.seed
-        ).split(dataset.data.y, dataset.data.y)
+        ).split(dataset.y, dataset.y)
     )
 
     if isinstance(split_ratios[0], float):
@@ -126,7 +126,7 @@ def setup_random_split(dataset):
         ShuffleSplit(
             train_size=val_test_ratio,
             random_state=cfg.seed
-        ).split(dataset.data.y[val_test_index], dataset.data.y[val_test_index])
+        ).split(dataset.y[val_test_index], dataset.y[val_test_index])
     )
     val_index = val_test_index[val_index]
     test_index = val_test_index[test_index]
@@ -186,7 +186,7 @@ def set_dataset_splits(dataset, splits):
     if task_level == 'node':
         split_names = ['train_mask', 'val_mask', 'test_mask']
         for split_name, split_index in zip(split_names, splits):
-            mask = index2mask(split_index, size=dataset.data.y.shape[0])
+            mask = index2mask(split_index, size=dataset.y.shape[0])
             set_dataset_attr(dataset, split_name, mask, len(mask))
 
     elif task_level == 'graph':
@@ -252,7 +252,7 @@ def create_cv_splits(dataset, cv_type, k, file_name):
     n_samples = len(dataset)
     if cv_type == 'stratifiedkfold':
         kf = StratifiedKFold(n_splits=k, shuffle=True, random_state=123)
-        kf_split = kf.split(np.zeros(n_samples), dataset.data.y)
+        kf_split = kf.split(np.zeros(n_samples), dataset.y)
     elif cv_type == 'kfold':
         kf = KFold(n_splits=k, shuffle=True, random_state=123)
         kf_split = kf.split(np.zeros(n_samples))

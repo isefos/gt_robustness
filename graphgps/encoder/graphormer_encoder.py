@@ -3,7 +3,10 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.graphgym.config import cfg
 from torch_geometric.graphgym.register import register_node_encoder
-from torch_geometric.utils import to_dense_adj, to_networkx
+from torch_geometric.utils import to_dense_adj, to_networkx, to_scipy_sparse_matrix
+import logging
+from scipy.sparse import csgraph
+
 
 # Permutes from (batch, node, node, head) to (batch, head, node, node)
 BATCH_HEAD_NODE_NODE = (0, 3, 1, 2)
@@ -12,7 +15,34 @@ BATCH_HEAD_NODE_NODE = (0, 3, 1, 2)
 INSERT_GRAPH_TOKEN = (1, 0, 1, 0)
 
 
-def graphormer_pre_processing(data, distance):
+def get_discrete_degrees(edge_index, num_nodes):
+    device = edge_index.device
+    in_degrees = torch.zeros(num_nodes, dtype=torch.long, device=device).scatter_(
+        value=1,
+        index=edge_index[1, :],
+        dim=0,
+        reduce="add",
+    )
+    out_degrees = None
+    num_out_d = cfg.posenc_GraphormerBias.num_out_degrees
+    num_in_d = cfg.posenc_GraphormerBias.num_in_degrees
+    if cfg.posenc_GraphormerBias.directed_graphs:
+        in_degrees[in_degrees >= num_in_d] = num_in_d - 1
+
+        out_degrees = torch.zeros(num_nodes, dtype=torch.long, device=device).scatter_(
+            value=1,
+            index=edge_index[0, :],
+            dim=0,
+            reduce="add",
+        )
+        out_degrees[in_degrees >= num_out_d] = num_out_d - 1
+    else:
+        num_d = max(num_in_d, num_out_d)
+        in_degrees[in_degrees >= num_d] = num_d - 1
+    return in_degrees, out_degrees
+
+
+def graphormer_pre_processing(data, is_undirected):
     """Implementation of Graphormer pre-processing. Computes in- and out-degrees
     for node encodings, as well as spatial types (via shortest-path lengths) and
     prepares edge encodings along shortest paths. The function adds the following
@@ -36,52 +66,58 @@ def graphormer_pre_processing(data, distance):
     Returns:
         The augmented data object.
     """
-    graph: nx.DiGraph = to_networkx(data)
-
-    data.in_degrees = torch.tensor([d for _, d in graph.in_degree()])
-    data.out_degrees = torch.tensor([d for _, d in graph.out_degree()])
-
-    max_in_degree = torch.max(data.in_degrees)
-    max_out_degree = torch.max(data.out_degrees)
-    if max_in_degree >= cfg.posenc_GraphormerBias.num_in_degrees:
-        raise ValueError(
-            f"Encountered in_degree: {max_in_degree}, set posenc_"
-            f"GraphormerBias.num_in_degrees to at least {max_in_degree + 1}"
+    n = data.x.size(0)
+    in_degrees, out_degrees = get_discrete_degrees(data.edge_index, n)
+    
+    if out_degrees is None:
+        assert is_undirected, (
+            "cfg.posenc_GraphormerBias.directed_graphs was set to False, but the data contains directed graphs! "
+            "Either set to True, or include a transformation to undirected to the dataset loader."
         )
-    if max_out_degree >= cfg.posenc_GraphormerBias.num_out_degrees:
-        raise ValueError(
-            f"Encountered out_degree: {max_out_degree}, set posenc_"
-            f"GraphormerBias.num_out_degrees to at least {max_out_degree + 1}"
-        )
+        data.degrees = in_degrees
+    else:
+        data.in_degrees = in_degrees
+        data.out_degrees = out_degrees
 
     if cfg.posenc_GraphormerBias.node_degrees_only:
         return data
 
-    N = len(graph.nodes)
-    shortest_paths = nx.shortest_path(graph)
-
-    spatial_types = torch.empty(N ** 2, dtype=torch.long).fill_(distance)
-    graph_index = torch.empty(2, N ** 2, dtype=torch.long)
-
-    if hasattr(data, "edge_attr") and data.edge_attr is not None:
+    data.graph_index = torch.cat(
+        (
+            torch.arange(n, dtype=torch.long).repeat_interleave(n)[None, :],
+            torch.arange(n, dtype=torch.long).repeat(n)[None, :],
+        ),
+        dim=0,
+    )
+    if not (
+        cfg.posenc_GraphormerBias.has_edge_attr 
+        and hasattr(data, "edge_attr") 
+        and data.edge_attr is not None
+    ):
+        data.spatial_types = get_shortest_paths(
+            edge_index=data.edge_index,
+            num_nodes=n,directed=not is_undirected,
+            max_distance=cfg.posenc_GraphormerBias.num_spatial_types-1
+        )
+    else:
+        # Note: not relevant for attackable weighted model
+        # did not bother optimizing this part yet, since we don't attack data with edge_attr:
+        distance = cfg.posenc_GraphormerBias.num_spatial_types
+        graph: nx.DiGraph = to_networkx(data)
+        N = len(graph.nodes)
+        shortest_paths = nx.shortest_path(graph)
+        spatial_types = torch.empty(N ** 2, dtype=torch.long).fill_(distance)
+        # TODO: only supports scalar edge_attr, right?
         shortest_path_types = torch.zeros(N ** 2, distance, dtype=torch.long)
         edge_attr = torch.zeros(N, N, dtype=torch.long)
         edge_attr[data.edge_index[0], data.edge_index[1]] = data.edge_attr
+        for i, paths in shortest_paths.items():
+            for j, path in paths.items():
+                if len(path) > distance:
+                    path = path[:distance]
 
-    for i in range(N):
-        for j in range(N):
-            graph_index[0, i * N + j] = i
-            graph_index[1, i * N + j] = j
-
-    for i, paths in shortest_paths.items():
-        for j, path in paths.items():
-            if len(path) > distance:
-                path = path[:distance]
-
-            assert len(path) >= 1
-            spatial_types[i * N + j] = len(path) - 1
-
-            if len(path) > 1 and hasattr(data, "edge_attr") and data.edge_attr is not None:
+                assert len(path) >= 1
+                spatial_types[i * N + j] = len(path) - 1
                 path_attr = [
                     edge_attr[path[k], path[k + 1]] for k in
                     range(len(path) - 1)  # len(path) * (num_edge_types)
@@ -90,19 +126,36 @@ def graphormer_pre_processing(data, distance):
                 # We map each edge-encoding-distance pair to a distinct value
                 # and so obtain dist * num_edge_features many encodings
                 shortest_path_types[i * N + j, :len(path) - 1] = torch.tensor(
-                    path_attr, dtype=torch.long)
-
-    data.spatial_types = spatial_types
-    data.graph_index = graph_index
-
-    if hasattr(data, "edge_attr") and data.edge_attr is not None:
+                    path_attr, dtype=torch.long
+                )
+        data.spatial_types = spatial_types
         data.shortest_path_types = shortest_path_types
     return data
 
 
+def get_shortest_paths(edge_index, num_nodes, directed, max_distance):
+    adj = to_scipy_sparse_matrix(edge_index, num_nodes=num_nodes).tocsr()
+    distances = csgraph.dijkstra(
+        adj,
+        directed=directed,
+        return_predecessors=False,
+        unweighted=False,
+        limit=max_distance,
+    )
+    distances[distances > max_distance] = max_distance
+    spatial_types = torch.tensor(distances.reshape(num_nodes ** 2), dtype=torch.long, device=edge_index.device)
+    return spatial_types
+
+
 class BiasEncoder(torch.nn.Module):
-    def __init__(self, num_heads: int, num_spatial_types: int,
-                 num_edge_types: int, use_graph_token: bool = True):
+    def __init__(
+        self,
+        num_heads: int,
+        num_spatial_types: int,
+        include_edge_feature_bias: bool,
+        num_edge_types: int,
+        use_graph_token: bool = True,
+    ):
         """Implementation of the bias encoder of Graphormer.
         This encoder is based on the implementation at:
         https://github.com/microsoft/Graphormer/tree/v1.0
@@ -117,14 +170,12 @@ class BiasEncoder(torch.nn.Module):
         """
         super().__init__()
         self.num_heads = num_heads
-
         # Takes into account disconnected nodes
-        self.spatial_encoder = torch.nn.Embedding(
-            num_spatial_types + 1, num_heads)
-        self.edge_dis_encoder = torch.nn.Embedding(
-            num_spatial_types * num_heads * num_heads, 1)
-        self.edge_encoder = torch.nn.Embedding(num_edge_types, num_heads)
-
+        self.spatial_encoder = torch.nn.Embedding(num_spatial_types, num_heads)
+        self.include_edge_feature_bias = include_edge_feature_bias
+        if self.include_edge_feature_bias:
+            self.edge_dis_encoder = torch.nn.Embedding(num_spatial_types * num_heads * num_heads, 1)
+            self.edge_encoder = torch.nn.Embedding(num_edge_types, num_heads)
         self.use_graph_token = use_graph_token
         if self.use_graph_token:
             self.graph_token = torch.nn.Parameter(torch.zeros(1, num_heads, 1))
@@ -132,8 +183,9 @@ class BiasEncoder(torch.nn.Module):
 
     def reset_parameters(self):
         self.spatial_encoder.weight.data.normal_(std=0.02)
-        self.edge_encoder.weight.data.normal_(std=0.02)
-        self.edge_dis_encoder.weight.data.normal_(std=0.02)
+        if self.include_edge_feature_bias:
+            self.edge_encoder.weight.data.normal_(std=0.02)
+            self.edge_dis_encoder.weight.data.normal_(std=0.02)
         if self.use_graph_token:
             self.graph_token.data.normal_(std=0.02)
 
@@ -148,25 +200,15 @@ class BiasEncoder(torch.nn.Module):
         # them into index and value. One example is the adjacency matrix
         # but this generalizes actually to any 2D matrix
         spatial_types: torch.Tensor = self.spatial_encoder(data.spatial_types)
-        spatial_encodings = to_dense_adj(data.graph_index,
-                                         data.batch,
-                                         spatial_types)
+        spatial_encodings = to_dense_adj(data.graph_index, data.batch, spatial_types)
         bias = spatial_encodings.permute(BATCH_HEAD_NODE_NODE)
 
-        if hasattr(data, "shortest_path_types"):
-            edge_types: torch.Tensor = self.edge_encoder(
-                data.shortest_path_types)
-            edge_encodings = to_dense_adj(data.graph_index,
-                                          data.batch,
-                                          edge_types)
-
-            spatial_distances = to_dense_adj(data.graph_index,
-                                             data.batch,
-                                             data.spatial_types)
+        if self.include_edge_feature_bias and hasattr(data, "shortest_path_types"):
+            edge_types: torch.Tensor = self.edge_encoder(data.shortest_path_types)
+            edge_encodings = to_dense_adj(data.graph_index, data.batch, edge_types)
+            spatial_distances = to_dense_adj(data.graph_index, data.batch, data.spatial_types)
             spatial_distances = spatial_distances.float().clamp(min=1.0).unsqueeze(1)
-
             B, N, _, max_dist, H = edge_encodings.shape
-
             edge_encodings = edge_encodings.permute(3, 0, 1, 2, 4).reshape(max_dist, -1, self.num_heads)
             edge_encodings = torch.bmm(edge_encodings, self.edge_dis_encoder.weight.reshape(-1, self.num_heads, self.num_heads))
             edge_encodings = edge_encodings.reshape(max_dist, B, N, N, self.num_heads).permute(1, 2, 3, 0, 4)
@@ -201,14 +243,21 @@ def add_graph_token(data, token):
     data.batch = torch.cat(
         [torch.arange(0, B, device=data.x.device, dtype=torch.long), data.batch]
     )
-    data.batch, sort_idx = torch.sort(data.batch)
+    data.batch, sort_idx = torch.sort(data.batch, stable=True)
     data.x = data.x[sort_idx]
     return data
 
 
 class NodeEncoder(torch.nn.Module):
-    def __init__(self, embed_dim, num_in_degree, num_out_degree,
-                 input_dropout=0.0, use_graph_token: bool = True):
+    def __init__(
+        self,
+        embed_dim,
+        num_in_degree,
+        num_out_degree,
+        directed_graphs: bool,
+        input_dropout=0.0,
+        use_graph_token: bool = True,
+    ):
         """Implementation of the node encoder of Graphormer.
         This encoder is based on the implementation at:
         https://github.com/microsoft/Graphormer/tree/v1.0
@@ -222,9 +271,13 @@ class NodeEncoder(torch.nn.Module):
             use_graph_token: If True, adds the graph token to the incoming batch.
         """
         super().__init__()
-        self.in_degree_encoder = torch.nn.Embedding(num_in_degree, embed_dim)
-        self.out_degree_encoder = torch.nn.Embedding(num_out_degree, embed_dim)
-
+        self.directed_graphs = directed_graphs
+        if self.directed_graphs:
+            self.in_degree_encoder = torch.nn.Embedding(num_in_degree, embed_dim)
+            self.out_degree_encoder = torch.nn.Embedding(num_out_degree, embed_dim)
+        else:
+            max_degree = max(num_in_degree, num_out_degree)
+            self.degree_encoder = torch.nn.Embedding(max_degree, embed_dim)
         self.use_graph_token = use_graph_token
         if self.use_graph_token:
             self.graph_token = torch.nn.Parameter(torch.zeros(1, embed_dim))
@@ -232,13 +285,17 @@ class NodeEncoder(torch.nn.Module):
         self.reset_parameters()
 
     def forward(self, data):
-        in_degree_encoding = self.in_degree_encoder(data.in_degrees)
-        out_degree_encoding = self.out_degree_encoder(data.out_degrees)
+        if self.directed_graphs:
+            in_degree_encoding = self.in_degree_encoder(data.in_degrees)
+            out_degree_encoding = self.out_degree_encoder(data.out_degrees)
+            degree_encoding = in_degree_encoding + out_degree_encoding
+        else:
+            degree_encoding = self.degree_encoder(data.degrees)
 
         if data.x.size(1) > 0:
-            data.x = data.x + in_degree_encoding + out_degree_encoding
+            data.x = data.x + degree_encoding
         else:
-            data.x = in_degree_encoding + out_degree_encoding
+            data.x = degree_encoding
 
         if self.use_graph_token:
             data = add_graph_token(data, self.graph_token)
@@ -246,8 +303,11 @@ class NodeEncoder(torch.nn.Module):
         return data
 
     def reset_parameters(self):
-        self.in_degree_encoder.weight.data.normal_(std=0.02)
-        self.out_degree_encoder.weight.data.normal_(std=0.02)
+        if self.directed_graphs:
+            self.in_degree_encoder.weight.data.normal_(std=0.02)
+            self.out_degree_encoder.weight.data.normal_(std=0.02)
+        else:
+            self.degree_encoder.weight.data.normal_(std=0.02)
         if self.use_graph_token:
             self.graph_token.data.normal_(std=0.02)
 
@@ -259,6 +319,7 @@ class GraphormerEncoder(torch.nn.Sequential):
             BiasEncoder(
                 cfg.graphormer.num_heads,
                 cfg.posenc_GraphormerBias.num_spatial_types,
+                cfg.posenc_GraphormerBias.has_edge_attr,
                 cfg.dataset.edge_encoder_num_types,
                 cfg.graphormer.use_graph_token
             ),
@@ -266,6 +327,7 @@ class GraphormerEncoder(torch.nn.Sequential):
                 dim_emb,
                 cfg.posenc_GraphormerBias.num_in_degrees,
                 cfg.posenc_GraphormerBias.num_out_degrees,
+                cfg.posenc_GraphormerBias.directed_graphs,
                 cfg.graphormer.input_dropout,
                 cfg.graphormer.use_graph_token
             ),

@@ -17,3 +17,6 @@ def dataset_cfg(cfg):
 
     # infer-link parameters (e.g., edge prediction task)
     cfg.dataset.infer_link_label = "None"
+
+    # PE Transform on the fly
+    cfg.dataset.pe_transform_on_the_fly = False

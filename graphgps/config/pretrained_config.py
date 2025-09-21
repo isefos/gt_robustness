@@ -13,6 +13,8 @@ def set_cfg_pretrained(cfg):
     # and fine-tune / run inference with it on a specified dataset.
     cfg.pretrained.dir = ""
 
+    cfg.pretrained.finetune = True
+
     # Discard pretrained weights of the prediction head and reinitialize.
     cfg.pretrained.reset_prediction_head = True
 

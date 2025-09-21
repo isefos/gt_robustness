@@ -1,43 +1,59 @@
 import logging
 import os.path as osp
 import time
+import warnings
 from functools import partial
-
 import numpy as np
 import torch
 import torch_geometric.transforms as T
 from numpy.random import default_rng
 from ogb.graphproppred import PygGraphPropPredDataset
-from torch_geometric.datasets import (Actor, GNNBenchmarkDataset, Planetoid,
-                                      TUDataset, WebKB, WikipediaNetwork, ZINC)
+from torch_geometric.datasets import (
+    Actor,
+    GNNBenchmarkDataset,
+    Planetoid,
+    CitationFull,
+    TUDataset,
+    WebKB,
+    WikipediaNetwork,
+    ZINC,
+    MalNetTiny,
+)
 from torch_geometric.graphgym.config import cfg
 from torch_geometric.graphgym.loader import load_pyg, load_ogb, set_dataset_attr
 from torch_geometric.graphgym.register import register_loader
 
 from graphgps.loader.dataset.aqsol_molecules import AQSOL
 from graphgps.loader.dataset.coco_superpixels import COCOSuperpixels
-from graphgps.loader.dataset.malnet_tiny import MalNetTiny
 from graphgps.loader.dataset.voc_superpixels import VOCSuperpixels
-from graphgps.loader.split_generator import (prepare_splits,
-                                             set_dataset_splits)
-from graphgps.transform.posenc_stats import compute_posenc_stats
+from graphgps.loader.dataset.upfd import UPFD
+from graphgps.loader.dataset.robust_unittest import RobustnessUnitTest
+from graphgps.loader.split_generator import (
+    prepare_splits,
+    set_dataset_splits,
+)
+from graphgps.transform.posenc_stats import compute_posenc_stats, ComputePosencStat
 from graphgps.transform.task_preprocessing import task_specific_preprocessing
-from graphgps.transform.transforms import (pre_transform_in_memory,
-                                           typecast_x, concat_x_and_pos,
-                                           clip_graphs_to_size)
+from graphgps.transform.transforms import (
+    pre_transform_in_memory,
+    typecast_x,
+    remove_edge_attr,
+    concat_x_and_pos,
+    clip_graphs_to_size,
+)
 
 
 def log_loaded_dataset(dataset, format, name):
     logging.info(f"[*] Loaded dataset '{name}' from '{format}':")
-    logging.info(f"  {dataset.data}")
+    logging.info(f"  {dataset._data}")
     logging.info(f"  undirected: {dataset[0].is_undirected()}")
     logging.info(f"  num graphs: {len(dataset)}")
 
     total_num_nodes = 0
-    if hasattr(dataset.data, 'num_nodes'):
-        total_num_nodes = dataset.data.num_nodes
-    elif hasattr(dataset.data, 'x'):
-        total_num_nodes = dataset.data.x.size(0)
+    if hasattr(dataset._data, 'num_nodes'):
+        total_num_nodes = dataset._data.num_nodes
+    elif hasattr(dataset, 'x'):
+        total_num_nodes = dataset.x.size(0)
     logging.info(f"  avg num_nodes/graph: "
                  f"{total_num_nodes // len(dataset)}")
     logging.info(f"  num node features: {dataset.num_node_features}")
@@ -45,21 +61,21 @@ def log_loaded_dataset(dataset, format, name):
     if hasattr(dataset, 'num_tasks'):
         logging.info(f"  num tasks: {dataset.num_tasks}")
 
-    if hasattr(dataset.data, 'y') and dataset.data.y is not None:
-        if isinstance(dataset.data.y, list):
+    if hasattr(dataset, 'y') and dataset.y is not None:
+        if isinstance(dataset.y, list):
             # A special case for ogbg-code2 dataset.
             logging.info(f"  num classes: n/a")
-        elif dataset.data.y.numel() == dataset.data.y.size(0) and \
-                torch.is_floating_point(dataset.data.y):
+        elif dataset.y.numel() == dataset.y.size(0) and \
+                torch.is_floating_point(dataset.y):
             logging.info(f"  num classes: (appears to be a regression task)")
         else:
             logging.info(f"  num classes: {dataset.num_classes}")
-    elif hasattr(dataset.data, 'train_edge_label') or hasattr(dataset.data, 'edge_label'):
+    elif hasattr(dataset._data, 'train_edge_label') or hasattr(dataset._data, 'edge_label'):
         # Edge/link prediction task.
-        if hasattr(dataset.data, 'train_edge_label'):
-            labels = dataset.data.train_edge_label  # Transductive link task
+        if hasattr(dataset._data, 'train_edge_label'):
+            labels = dataset._data.train_edge_label  # Transductive link task
         else:
-            labels = dataset.data.edge_label  # Inductive link task
+            labels = dataset._data.edge_label  # Inductive link task
         if labels.numel() == labels.size(0) and \
                 torch.is_floating_point(labels):
             logging.info(f"  num edge classes: (probably a regression task)")
@@ -115,6 +131,12 @@ def load_dataset_master(format, name, dataset_dir):
         elif pyg_dataset_id == 'Planetoid':
             dataset = Planetoid(dataset_dir, name)
 
+        elif pyg_dataset_id == 'CitationFull':
+            dataset = CitationFull(dataset_dir, name)
+
+        elif pyg_dataset_id == 'RobustnessUnitTest':
+            dataset = RobustnessUnitTest(root=dataset_dir, name=name)
+
         elif pyg_dataset_id == 'TUDataset':
             dataset = preformat_TUDataset(dataset_dir, name)
 
@@ -129,6 +151,9 @@ def load_dataset_master(format, name, dataset_dir):
 
         elif pyg_dataset_id == 'ZINC':
             dataset = preformat_ZINC(dataset_dir, name)
+
+        elif pyg_dataset_id == 'UPFD':
+            dataset = preformat_UPFD(dataset_dir, name)
             
         elif pyg_dataset_id == 'AQSOL':
             dataset = preformat_AQSOL(dataset_dir, name)
@@ -185,35 +210,7 @@ def load_dataset_master(format, name, dataset_dir):
     log_loaded_dataset(dataset, format, name)
 
     # Precompute necessary statistics for positional encodings.
-    pe_enabled_list = []
-    for key, pecfg in cfg.items():
-        if key.startswith('posenc_') and pecfg.enable:
-            pe_name = key.split('_', 1)[1]
-            pe_enabled_list.append(pe_name)
-            if hasattr(pecfg, 'kernel'):
-                # Generate kernel times if functional snippet is set.
-                if pecfg.kernel.times_func:
-                    pecfg.kernel.times = list(eval(pecfg.kernel.times_func))
-                logging.info(f"Parsed {pe_name} PE kernel times / steps: "
-                             f"{pecfg.kernel.times}")
-    if pe_enabled_list:
-        start = time.perf_counter()
-        logging.info(f"Precomputing Positional Encoding statistics: "
-                     f"{pe_enabled_list} for all graphs...")
-        # Estimate directedness based on 10 graphs to save time.
-        is_undirected = all(d.is_undirected() for d in dataset[:10])
-        logging.info(f"  ...estimated to be undirected: {is_undirected}")
-        pre_transform_in_memory(dataset,
-                                partial(compute_posenc_stats,
-                                        pe_types=pe_enabled_list,
-                                        is_undirected=is_undirected,
-                                        cfg=cfg),
-                                show_progress=True
-                                )
-        elapsed = time.perf_counter() - start
-        timestr = time.strftime('%H:%M:%S', time.gmtime(elapsed)) \
-                  + f'{elapsed:.2f}'[-3:]
-        logging.info(f"Done! Took {timestr}")
+    compute_PE_stats_(dataset)
 
     # Set standard dataset train/val/test splits
     if hasattr(dataset, 'split_idxs'):
@@ -231,6 +228,52 @@ def load_dataset_master(format, name, dataset_dir):
         # print(f"Avg:{np.mean(cfg.gt.pna_degrees)}")
 
     return dataset
+
+
+def compute_PE_stats_(dataset):
+    pe_enabled_list = []
+    for key, pecfg in cfg.items():
+        if key.startswith('posenc_') and pecfg.enable:
+            pe_name = key.split('_', 1)[1]
+            pe_enabled_list.append(pe_name)
+            if hasattr(pecfg, 'kernel'):
+                # Generate kernel times if functional snippet is set.
+                if pecfg.kernel.times_func:
+                    pecfg.kernel.times = list(eval(pecfg.kernel.times_func))
+                logging.info(f"Parsed {pe_name} PE kernel times / steps: {pecfg.kernel.times}")
+    if pe_enabled_list:
+        start = time.perf_counter()
+        logging.info(f"Precomputing Positional Encoding statistics: {pe_enabled_list} for all graphs...")
+        # Estimate directedness based on 10 graphs to save time.
+        is_undirected = all(d.is_undirected() for d in dataset[:10])
+        logging.info(f"  ...estimated to be undirected: {is_undirected}")
+        if not cfg.dataset.pe_transform_on_the_fly:
+            pre_transform_in_memory(
+                dataset,
+                partial(
+                    compute_posenc_stats,
+                    pe_types=pe_enabled_list,
+                    is_undirected=is_undirected,
+                    cfg=cfg,
+                ),
+                show_progress=True,
+            )
+            elapsed = time.perf_counter() - start
+            timestr = time.strftime('%H:%M:%S', time.gmtime(elapsed)) + f'{elapsed:.2f}'[-3:]
+            logging.info(f"Done! Took {timestr}")
+        else:
+            warnings.warn(
+                'PE transform on the fly to save memory consumption; experimental, please only use for RWSE/RWPSE'
+            )
+            pe_transform = ComputePosencStat(
+                pe_types=pe_enabled_list,
+                is_undirected=is_undirected,
+                cfg=cfg,
+            )
+            if dataset.transform is None:
+                dataset.transform = pe_transform
+            else:
+                dataset.transform = T.compose([pe_transform, dataset.transform])
 
 
 def compute_indegree_histogram(dataset):
@@ -259,7 +302,7 @@ def preformat_GNNBenchmarkDataset(dataset_dir, name):
 
     Args:
         dataset_dir: path where to store the cached dataset
-        name: name of the specific dataset in the TUDataset class
+        name: name of the specific dataset
 
     Returns:
         PyG dataset object
@@ -305,15 +348,13 @@ def preformat_MalNetTiny(dataset_dir, feature_set):
     else:
         raise ValueError(f"Unexpected transform function: {feature_set}")
 
-    dataset = MalNetTiny(dataset_dir)
+    dataset = join_dataset_splits(
+        [MalNetTiny(root=dataset_dir, split=split) for split in ['train', 'val', 'test']]
+    )
     dataset.name = 'MalNetTiny'
+
     logging.info(f'Computing "{feature_set}" node features for MalNetTiny.')
     pre_transform_in_memory(dataset, tf)
-
-    split_dict = dataset.get_idx_split()
-    dataset.split_idxs = [split_dict['train'],
-                          split_dict['valid'],
-                          split_dict['test']]
 
     return dataset
 
@@ -366,6 +407,9 @@ def preformat_OGB_Graph(dataset_dir, name):
         # Subset graphs to a maximum size (number of nodes) limit.
         pre_transform_in_memory(dataset, partial(clip_graphs_to_size,
                                                  size_limit=1000))
+    elif name == "ogbg-molhiv" and not cfg.dataset.edge_encoder:
+        # remove edge labels (because we use edge attr in attack)
+        pre_transform_in_memory(dataset, remove_edge_attr)
 
     return dataset
 
@@ -533,14 +577,24 @@ def preformat_TUDataset(dataset_dir, name):
     Returns:
         PyG dataset object
     """
-    if name in ['DD', 'NCI1', 'ENZYMES', 'PROTEINS', 'TRIANGLES']:
+    func = None
+    use_node_attr = False
+    if name in ['DD', 'NCI1', 'ENZYMES', 'MUTAG', 'PROTEINS', 'TRIANGLES']:
         func = None
-    elif name.startswith('IMDB-') or name == "COLLAB":
+        if name == 'ENZYMES':
+            use_node_attr = True
+    elif (
+        name.startswith('IMDB-') 
+        or name.startswith("REDDIT-") 
+        or name in ["COLLAB", "twitch_egos", "reddit_threads", "github_stargazers"]
+    ):
         func = T.Constant()
     else:
-        raise ValueError(f"Loading dataset '{name}' from "
-                         f"TUDataset is not supported.")
-    dataset = TUDataset(dataset_dir, name, pre_transform=func)
+        raise ValueError(f"Loading dataset '{name}' from TUDataset is not supported.")
+    dataset = TUDataset(dataset_dir, name, pre_transform=func, use_node_attr=use_node_attr)
+    if name == "MUTAG" and not cfg.dataset.edge_encoder:
+        # remove edge labels (because we use edge attr in attack)
+        pre_transform_in_memory(dataset, remove_edge_attr)
     return dataset
 
 
@@ -560,6 +614,32 @@ def preformat_ZINC(dataset_dir, name):
         [ZINC(root=dataset_dir, subset=(name == 'subset'), split=split)
          for split in ['train', 'val', 'test']]
     )
+    if not cfg.dataset.edge_encoder:
+        # remove edge labels (because we use edge attr in attack)
+        pre_transform_in_memory(dataset, remove_edge_attr)
+    return dataset
+
+
+def preformat_UPFD(dataset_dir, name: str):
+    """Load and preformat UPFD datasets.
+
+    Args:
+        dataset_dir: path where to store the cached dataset
+        name: select the sub-dataset combined by a dash with the features to use
+
+    Returns:
+        PyG dataset object
+    """
+    dataset_name, dataset_features = name.split('-', 1)
+    if dataset_name not in ["politifact", "gossipcop"]:
+        raise ValueError(f"Unexpected dataset name choice for UPFD dataset: {dataset_name}")
+    if dataset_features not in ["profile", "spacy", "bert", "content"]:
+        raise ValueError(f"Unexpected dataset name choice for UPFD dataset: {dataset_features}")
+    dataset = join_dataset_splits(
+        [UPFD(root=dataset_dir, name=dataset_name, feature=dataset_features, split=split)
+         for split in ['train', 'val', 'test']]
+    )
+    pre_transform_in_memory(dataset, T.ToUndirected())
     return dataset
 
 

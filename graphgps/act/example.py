@@ -24,3 +24,6 @@ register_act('lrelu_03', partial(nn.LeakyReLU, 0.3, inplace=cfg.mem.inplace))
 
 # Add Gaussian Error Linear Unit (GELU).
 register_act('gelu', nn.GELU)
+
+
+register_act('identity', nn.Identity)

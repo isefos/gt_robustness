@@ -51,6 +51,11 @@ def concat_x_and_pos(data):
     return data
 
 
+def remove_edge_attr(data):
+    data.edge_attr = torch.ones(data.edge_attr.shape[0])
+    return data
+
+
 def clip_graphs_to_size(data, size_limit=5000):
     if hasattr(data, 'num_nodes'):
         N = data.num_nodes  # Explicitly given number of nodes, e.g. ogbg-ppa

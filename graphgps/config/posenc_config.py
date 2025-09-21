@@ -9,15 +9,18 @@ def set_cfg_posenc(cfg):
 
     # Argument group for each Positional Encoding class.
     cfg.posenc_LapPE = CN()
+    cfg.posenc_WLapPE = CN()
     cfg.posenc_SignNet = CN()
     cfg.posenc_RWSE = CN()
     cfg.posenc_HKdiagSE = CN()
     cfg.posenc_ElstaticSE = CN()
     cfg.posenc_EquivStableLapPE = CN()
+    cfg.posenc_RRWP = CN()
 
     # Common arguments to all PE types.
-    for name in ['posenc_LapPE', 'posenc_SignNet',
-                 'posenc_RWSE', 'posenc_HKdiagSE', 'posenc_ElstaticSE']:
+    for name in [
+        'posenc_LapPE', 'posenc_WLapPE', 'posenc_SignNet', 'posenc_RWSE', 'posenc_HKdiagSE', 'posenc_ElstaticSE',
+    ]:
         pecfg = getattr(cfg, name)
 
         # Use extended positional encodings
@@ -51,7 +54,7 @@ def set_cfg_posenc(cfg):
     cfg.posenc_EquivStableLapPE.raw_norm_type = 'none'
 
     # Config for Laplacian Eigen-decomposition for PEs that use it.
-    for name in ['posenc_LapPE', 'posenc_SignNet', 'posenc_EquivStableLapPE']:
+    for name in ['posenc_LapPE', 'posenc_WLapPE', 'posenc_SignNet', 'posenc_EquivStableLapPE']:
         pecfg = getattr(cfg, name)
         pecfg.eigen = CN()
 
@@ -85,3 +88,11 @@ def set_cfg_posenc(cfg):
 
     # Override default, electrostatic kernel has fixed set of 10 measures.
     cfg.posenc_ElstaticSE.kernel.times_func = 'range(10)'
+
+    # RRWP (GRIT)
+    cfg.posenc_RRWP.enable = False
+    cfg.posenc_RRWP.ksteps = 10
+    cfg.posenc_RRWP.w_add_dummy_edge = True
+
+    # weighted SAN
+    cfg.posenc_WLapPE.w_add_dummy_edge = True

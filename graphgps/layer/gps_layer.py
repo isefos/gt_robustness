@@ -10,18 +10,32 @@ from torch_geometric.utils import to_dense_batch
 
 from graphgps.layer.bigbird_layer import SingleBigBirdLayer
 from graphgps.layer.gatedgcn_layer import GatedGCNLayer
+from graphgps.layer.weighted_gatedgcn_layer import WeightedGatedGCNLayer
 from graphgps.layer.gine_conv_layer import GINEConvESLapPE
+
+from torch_geometric.graphgym.config import cfg
 
 
 class GPSLayer(nn.Module):
     """Local MPNN + full graph attention x-former layer.
     """
 
-    def __init__(self, dim_h,
-                 local_gnn_type, global_model_type, num_heads, act='relu',
-                 pna_degrees=None, equivstable_pe=False, dropout=0.0,
-                 attn_dropout=0.0, layer_norm=False, batch_norm=True,
-                 bigbird_cfg=None, log_attn_weights=False):
+    def __init__(
+        self,
+        dim_h,
+        local_gnn_type,
+        global_model_type,
+        num_heads,
+        act='relu',
+        pna_degrees=None,
+        equivstable_pe=False,
+        dropout=0.0,
+        attn_dropout=0.0,
+        layer_norm=False,
+        batch_norm=True,
+        bigbird_cfg=None,
+        log_attn_weights=False,
+    ):
         super().__init__()
 
         self.dim_h = dim_h
@@ -33,8 +47,7 @@ class GPSLayer(nn.Module):
         self.activation = register.act_dict[act]
 
         self.log_attn_weights = log_attn_weights
-        if log_attn_weights and global_model_type not in ['Transformer',
-                                                          'BiasedTransformer']:
+        if log_attn_weights and global_model_type not in ['Transformer', 'BiasedTransformer']:
             raise NotImplementedError(
                 f"Logging of attention weights is not supported "
                 f"for '{global_model_type}' global attention model."
@@ -46,32 +59,38 @@ class GPSLayer(nn.Module):
             self.local_model = None
 
         # MPNNs without edge attributes support.
-        elif local_gnn_type == "GCN":
+        elif local_gnn_type in ["GCN", "WeightedGCN"]:
             self.local_gnn_with_edge_attr = False
             self.local_model = pygnn.GCNConv(dim_h, dim_h)
         elif local_gnn_type == 'GIN':
             self.local_gnn_with_edge_attr = False
-            gin_nn = nn.Sequential(Linear_pyg(dim_h, dim_h),
-                                   self.activation(),
-                                   Linear_pyg(dim_h, dim_h))
+            gin_nn = nn.Sequential(
+                Linear_pyg(dim_h, dim_h),
+                self.activation(),
+                Linear_pyg(dim_h, dim_h),
+            )
             self.local_model = pygnn.GINConv(gin_nn)
 
         # MPNNs supporting also edge attributes.
         elif local_gnn_type == 'GENConv':
             self.local_model = pygnn.GENConv(dim_h, dim_h)
         elif local_gnn_type == 'GINE':
-            gin_nn = nn.Sequential(Linear_pyg(dim_h, dim_h),
-                                   self.activation(),
-                                   Linear_pyg(dim_h, dim_h))
+            gin_nn = nn.Sequential(
+                Linear_pyg(dim_h, dim_h),
+                self.activation(),
+                Linear_pyg(dim_h, dim_h),
+            )
             if self.equivstable_pe:  # Use specialised GINE layer for EquivStableLapPE.
                 self.local_model = GINEConvESLapPE(gin_nn)
             else:
                 self.local_model = pygnn.GINEConv(gin_nn)
         elif local_gnn_type == 'GAT':
-            self.local_model = pygnn.GATConv(in_channels=dim_h,
-                                             out_channels=dim_h // num_heads,
-                                             heads=num_heads,
-                                             edge_dim=dim_h)
+            self.local_model = pygnn.GATConv(
+                in_channels=dim_h,
+                out_channels=dim_h // num_heads,
+                heads=num_heads,
+                edge_dim=dim_h,
+            )
         elif local_gnn_type == 'PNA':
             # Defaults from the paper.
             # aggregators = ['mean', 'min', 'max', 'std']
@@ -79,21 +98,36 @@ class GPSLayer(nn.Module):
             aggregators = ['mean', 'max', 'sum']
             scalers = ['identity']
             deg = torch.from_numpy(np.array(pna_degrees))
-            self.local_model = pygnn.PNAConv(dim_h, dim_h,
-                                             aggregators=aggregators,
-                                             scalers=scalers,
-                                             deg=deg,
-                                             edge_dim=min(128, dim_h),
-                                             towers=1,
-                                             pre_layers=1,
-                                             post_layers=1,
-                                             divide_input=False)
+            self.local_model = pygnn.PNAConv(
+                dim_h,
+                dim_h,
+                aggregators=aggregators,
+                scalers=scalers,
+                deg=deg,
+                edge_dim=min(128, dim_h),
+                towers=1,
+                pre_layers=1,
+                post_layers=1,
+                divide_input=False,
+            )
         elif local_gnn_type == 'CustomGatedGCN':
-            self.local_model = GatedGCNLayer(dim_h, dim_h,
-                                             dropout=dropout,
-                                             residual=True,
-                                             act=act,
-                                             equivstable_pe=equivstable_pe)
+            self.local_model = GatedGCNLayer(
+                dim_h,
+                dim_h,
+                dropout=dropout,
+                residual=True,
+                act=act,
+                equivstable_pe=equivstable_pe,
+            )
+        elif local_gnn_type == "WeightedGatedGCN":
+            self.local_model = WeightedGatedGCNLayer(
+                dim_h,
+                dim_h,
+                dropout=dropout,
+                residual=True,
+                act=act,
+                equivstable_pe=equivstable_pe,
+            )
         else:
             raise ValueError(f"Unsupported local GNN model: {local_gnn_type}")
         self.local_gnn_type = local_gnn_type
@@ -118,8 +152,7 @@ class GPSLayer(nn.Module):
             bigbird_cfg.dropout = dropout
             self.self_attn = SingleBigBirdLayer(bigbird_cfg)
         else:
-            raise ValueError(f"Unsupported global x-former model: "
-                             f"{global_model_type}")
+            raise ValueError(f"Unsupported global x-former model: {global_model_type}")
         self.global_model_type = global_model_type
 
         if self.layer_norm and self.batch_norm:
@@ -164,14 +197,46 @@ class GPSLayer(nn.Module):
                 es_data = None
                 if self.equivstable_pe:
                     es_data = batch.pe_EquivStableLapPE
-                local_out = self.local_model(Batch(batch=batch,
-                                                   x=h,
-                                                   edge_index=batch.edge_index,
-                                                   edge_attr=batch.edge_attr,
-                                                   pe_EquivStableLapPE=es_data))
+                local_out = self.local_model(
+                    Batch(
+                        batch=batch,
+                        x=h,
+                        edge_index=batch.edge_index,
+                        edge_attr=batch.edge_attr,
+                        pe_EquivStableLapPE=es_data,
+                    )
+                )
                 # GatedGCN does residual connection and dropout internally.
                 h_local = local_out.x
                 batch.edge_attr = local_out.edge_attr
+            if self.local_gnn_type == 'WeightedGatedGCN':
+                es_data = None
+                if self.equivstable_pe:
+                    es_data = batch.pe_EquivStableLapPE
+                # need to pass edge probabilities as well
+                edge_attr = batch.edge_attr
+                if (edge_attr is not None) and (not cfg.attack.GPS.grad_MPNN):
+                    edge_attr = edge_attr.detach()
+                if edge_attr is None:
+                    edge_attr = h.new_ones(batch.edge_index.size(1))
+                h_local, batch.edge_features = self.local_model(
+                    x=h,
+                    e=batch.edge_features,
+                    e_prob=edge_attr,
+                    edge_index=batch.edge_index,
+                    pe_EquivStableLapPE=es_data,
+                )
+                # GatedGCN does residual connection and dropout internally.
+            elif self.local_gnn_type == "WeightedGCN":
+                # need to pass edge probabilities as well
+                edge_attr = batch.edge_attr
+                if (edge_attr is not None) and (not cfg.attack.GPS.grad_MPNN):
+                    edge_attr = edge_attr.detach()
+                if edge_attr is None:
+                    edge_attr = h.new_ones(batch.edge_index.size(1))
+                h_local = self.local_model(h, batch.edge_index, edge_attr)
+                h_local = self.dropout_local(h_local)
+                h_local = h_in1 + h_local  # Residual connection.
             else:
                 if self.local_gnn_with_edge_attr:
                     if self.equivstable_pe:
@@ -196,12 +261,40 @@ class GPSLayer(nn.Module):
 
         # Multi-head attention.
         if self.self_attn is not None:
+
             h_dense, mask = to_dense_batch(h, batch.batch)
-            if self.global_model_type == 'Transformer':
-                h_attn = self._sa_block(h_dense, None, ~mask)[mask]
-            elif self.global_model_type == 'BiasedTransformer':
+            B, N, _ = h_dense.shape
+
+            attn_bias = None
+            if self.global_model_type == 'BiasedTransformer':
                 # Use Graphormer-like conditioning, requires `batch.attn_bias`.
-                h_attn = self._sa_block(h_dense, batch.attn_bias, ~mask)[mask]
+                attn_bias = batch.attn_bias
+                assert attn_bias is not None, "When using `BiasedTransformer`, must set `batch.attn_bias`."
+
+            if hasattr(batch, "node_logprob"):
+                assert batch.node_logprob.size(0) == N
+                if not attn_bias:
+                    attn_bias = h_dense.new_zeros((self.num_heads * B, N, N))
+                attn_bias += batch.node_logprob[None, None, :]
+                
+            elif hasattr(batch, "node_prob"):
+                assert batch.node_prob.size(0) == N
+                if not attn_bias:
+                    attn_bias = h_dense.new_zeros((self.num_heads * B, N, N))
+                # if p is so small that log(p) = -inf, gradient is undefined, so just set -inf for very small p
+                l = torch.zeros_like(batch.node_prob) - torch.inf
+                min_prob_mask = batch.node_prob > 1e-30
+                l[min_prob_mask] = batch.node_prob[min_prob_mask].log()
+                bias += l[None, None, :]
+            
+            if attn_bias is not None:
+                assert self.global_model_type in ['Transformer', 'BiasedTransformer'], "Not implemented for others yet."
+                key_padding_mask = (torch.zeros_like(~mask, dtype=torch.float32).masked_fill_(~mask, float("-inf")))
+            else:
+                key_padding_mask = ~mask
+
+            if self.global_model_type in ['Transformer', 'BiasedTransformer']:
+                h_attn = self._sa_block(h_dense, attn_bias, key_padding_mask)[mask]
             elif self.global_model_type == 'Performer':
                 h_attn = self.self_attn(h_dense, mask=mask)[mask]
             elif self.global_model_type == 'BigBird':

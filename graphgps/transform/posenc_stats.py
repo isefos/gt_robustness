@@ -1,13 +1,20 @@
 from copy import deepcopy
-
 import numpy as np
 import torch
 import torch.nn.functional as F
-from numpy.linalg import eigvals
-from torch_geometric.utils import (get_laplacian, to_scipy_sparse_matrix,
-                                   to_undirected, to_dense_adj, scatter)
+from torch_geometric.utils import (
+    get_laplacian,
+    to_scipy_sparse_matrix,
+    to_undirected,
+    to_dense_adj,
+    scatter,
+)
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from graphgps.encoder.graphormer_encoder import graphormer_pre_processing
+from torch_geometric.transforms import BaseTransform
+from torch_geometric.data import Data
+from graphgps.transform.rrwp import add_full_rrwp
+from graphgps.transform.lap_eig import get_lap_decomp_stats
 
 
 def compute_posenc_stats(data, pe_types, is_undirected, cfg):
@@ -20,6 +27,7 @@ def compute_posenc_stats(data, pe_types, is_undirected, cfg):
     'HKdiagSE': Diagonals of heat kernel diffusion.
     'ElstaticSE': Kernel based on the electrostatic interaction between nodes.
     'Graphormer': Computes spatial types and optionally edges along shortest paths.
+    'RRWP': Relative Random Walk Probabilities PE (for GRIT)
 
     Args:
         data: PyG graph
@@ -33,8 +41,10 @@ def compute_posenc_stats(data, pe_types, is_undirected, cfg):
     """
     # Verify PE types.
     for t in pe_types:
-        if t not in ['LapPE', 'EquivStableLapPE', 'SignNet', 'RWSE', 'HKdiagSE',
-                     'HKfullPE', 'ElstaticSE', 'GraphormerBias']:
+        if t not in [
+            'LapPE', 'EquivStableLapPE', 'SignNet', 'RWSE', 'HKdiagSE', 'HKfullPE', 'ElstaticSE', 'GraphormerBias',
+            'RRWP', 'WLapPE',
+        ]:
             raise ValueError(f"Unexpected PE stats selection {t} in {pe_types}")
 
     # Basic preprocessing of the input graph.
@@ -42,72 +52,61 @@ def compute_posenc_stats(data, pe_types, is_undirected, cfg):
         N = data.num_nodes  # Explicitly given number of nodes, e.g. ogbg-ppa
     else:
         N = data.x.shape[0]  # Number of nodes, including disconnected nodes.
-    laplacian_norm_type = cfg.posenc_LapPE.eigen.laplacian_norm.lower()
-    if laplacian_norm_type == 'none':
-        laplacian_norm_type = None
     if is_undirected:
         undir_edge_index = data.edge_index
     else:
         undir_edge_index = to_undirected(data.edge_index)
 
-    # Eigen values and vectors.
-    evals, evects = None, None
-    if 'LapPE' in pe_types or 'EquivStableLapPE' in pe_types:
-        # Eigen-decomposition with numpy, can be reused for Heat kernels.
-        L = to_scipy_sparse_matrix(
-            *get_laplacian(undir_edge_index, normalization=laplacian_norm_type,
-                           num_nodes=N)
+    # Eigen values and vectors, Eigen-decomposition can be reused for Heat kernels.
+    eigenvalues, eigenvectors, lap_norm = None, None, None
+    eigPEs = set(('LapPE', 'WLapPE', 'EquivStableLapPE', 'SignNet'))
+    eigPE = eigPEs.intersection(pe_types)
+    assert len(eigPE) <= 1, "Selection of only one eigen-decomposition PE type currently supported."
+    if eigPE:
+        eigPE = eigPE.pop()
+        pe_cfg = cfg.get(f"posenc_{eigPE}")
+        lap_norm = pe_cfg.eigen.laplacian_norm
+        assert is_undirected, (
+            "Lap. Eig. decomposition currently requires undirected graphs (transform dataset to undirected)."
         )
-        evals, evects = np.linalg.eigh(L.toarray())
-        
-        if 'LapPE' in pe_types:
-            max_freqs=cfg.posenc_LapPE.eigen.max_freqs
-            eigvec_norm=cfg.posenc_LapPE.eigen.eigvec_norm
-        elif 'EquivStableLapPE' in pe_types:  
-            max_freqs=cfg.posenc_EquivStableLapPE.eigen.max_freqs
-            eigvec_norm=cfg.posenc_EquivStableLapPE.eigen.eigvec_norm
-        
-        data.EigVals, data.EigVecs = get_lap_decomp_stats(
-            evals=evals, evects=evects,
-            max_freqs=max_freqs,
-            eigvec_norm=eigvec_norm)
-
-    if 'SignNet' in pe_types:
-        # Eigen-decomposition with numpy for SignNet.
-        norm_type = cfg.posenc_SignNet.eigen.laplacian_norm.lower()
-        if norm_type == 'none':
-            norm_type = None
-        L = to_scipy_sparse_matrix(
-            *get_laplacian(undir_edge_index, normalization=norm_type,
-                           num_nodes=N)
+        num_nodes = data.x.size(0)
+        eigenvalues, eigenvectors = get_lap_decomp_stats(
+            data.edge_index,
+            data.edge_attr,
+            num_nodes,
+            pe_cfg.eigen.laplacian_norm,
+            max_freqs=pe_cfg.eigen.max_freqs,
+            eigvec_norm=pe_cfg.eigen.eigvec_norm,
         )
-        evals_sn, evects_sn = np.linalg.eigh(L.toarray())
-        data.eigvals_sn, data.eigvecs_sn = get_lap_decomp_stats(
-            evals=evals_sn, evects=evects_sn,
-            max_freqs=cfg.posenc_SignNet.eigen.max_freqs,
-            eigvec_norm=cfg.posenc_SignNet.eigen.eigvec_norm)
+        eigenvalues = eigenvalues.repeat(num_nodes, 1)[:, :, None]
+        if eigPE == 'SignNet':
+            data.eigvals_sn, data.eigvecs_sn = eigenvalues, eigenvectors
+        else:
+            data.EigVals, data.EigVecs = eigenvalues, eigenvectors
 
     # Random Walks.
     if 'RWSE' in pe_types:
         kernel_param = cfg.posenc_RWSE.kernel
         if len(kernel_param.times) == 0:
             raise ValueError("List of kernel times required for RWSE")
-        rw_landing = get_rw_landing_probs(ksteps=kernel_param.times,
-                                          edge_index=data.edge_index,
-                                          num_nodes=N)
+        rw_landing = get_rw_landing_probs(
+            ksteps=kernel_param.times,
+            edge_index=data.edge_index,
+            num_nodes=N,
+        )
         data.pestat_RWSE = rw_landing
 
     # Heat Kernels.
     if 'HKdiagSE' in pe_types or 'HKfullPE' in pe_types:
         # Get the eigenvalues and eigenvectors of the regular Laplacian,
         # if they have not yet been computed for 'eigen'.
-        if laplacian_norm_type is not None or evals is None or evects is None:
+        if lap_norm is not None or eigenvalues is None or eigenvectors is None:
             L_heat = to_scipy_sparse_matrix(
                 *get_laplacian(undir_edge_index, normalization=None, num_nodes=N)
             )
             evals_heat, evects_heat = np.linalg.eigh(L_heat.toarray())
         else:
-            evals_heat, evects_heat = evals, evects
+            evals_heat, evects_heat = eigenvalues, eigenvectors
         evals_heat = torch.from_numpy(evals_heat)
         evects_heat = torch.from_numpy(evects_heat)
 
@@ -126,9 +125,12 @@ def compute_posenc_stats(data, pe_types, is_undirected, cfg):
             kernel_param = cfg.posenc_HKdiagSE.kernel
             if len(kernel_param.times) == 0:
                 raise ValueError("Diffusion times are required for heat kernel")
-            hk_diag = get_heat_kernels_diag(evects_heat, evals_heat,
-                                            kernel_times=kernel_param.times,
-                                            space_dim=0)
+            hk_diag = get_heat_kernels_diag(
+                evects_heat,
+                evals_heat,
+                kernel_times=kernel_param.times,
+                space_dim=0,
+            )
             data.pestat_HKdiagSE = hk_diag
 
     # Electrostatic interaction inspired kernel.
@@ -136,49 +138,17 @@ def compute_posenc_stats(data, pe_types, is_undirected, cfg):
         elstatic = get_electrostatic_function_encoding(undir_edge_index, N)
         data.pestat_ElstaticSE = elstatic
 
+    # Graphormer PE: shortest paths and degrees
     if 'GraphormerBias' in pe_types:
-        data = graphormer_pre_processing(
-            data,
-            cfg.posenc_GraphormerBias.num_spatial_types
-        )
+        with torch.no_grad():
+            data = graphormer_pre_processing(data, is_undirected)
+    
+    # GRIT PE (Relative Random Walk Probabilities)
+    if 'RRWP' in pe_types:
+        with torch.no_grad():
+            data = add_full_rrwp(data, walk_length=cfg.posenc_RRWP.ksteps)
 
     return data
-
-
-def get_lap_decomp_stats(evals, evects, max_freqs, eigvec_norm='L2'):
-    """Compute Laplacian eigen-decomposition-based PE stats of the given graph.
-
-    Args:
-        evals, evects: Precomputed eigen-decomposition
-        max_freqs: Maximum number of top smallest frequencies / eigenvecs to use
-        eigvec_norm: Normalization for the eigen vectors of the Laplacian
-    Returns:
-        Tensor (num_nodes, max_freqs, 1) eigenvalues repeated for each node
-        Tensor (num_nodes, max_freqs) of eigenvector values per node
-    """
-    N = len(evals)  # Number of nodes, including disconnected nodes.
-
-    # Keep up to the maximum desired number of frequencies.
-    idx = evals.argsort()[:max_freqs]
-    evals, evects = evals[idx], np.real(evects[:, idx])
-    evals = torch.from_numpy(np.real(evals)).clamp_min(0)
-
-    # Normalize and pad eigen vectors.
-    evects = torch.from_numpy(evects).float()
-    evects = eigvec_normalizer(evects, evals, normalization=eigvec_norm)
-    if N < max_freqs:
-        EigVecs = F.pad(evects, (0, max_freqs - N), value=float('nan'))
-    else:
-        EigVecs = evects
-
-    # Pad and save eigenvalues.
-    if N < max_freqs:
-        EigVals = F.pad(evals, (0, max_freqs - N), value=float('nan')).unsqueeze(0)
-    else:
-        EigVals = evals.unsqueeze(0)
-    EigVals = EigVals.repeat(N, 1).unsqueeze(2)
-
-    return EigVals, EigVecs
 
 
 def get_rw_landing_probs(ksteps, edge_index, edge_weight=None,
@@ -349,54 +319,17 @@ def get_electrostatic_function_encoding(edge_index, num_nodes):
     return green_encoding
 
 
-def eigvec_normalizer(EigVecs, EigVals, normalization="L2", eps=1e-12):
-    """
-    Implement different eigenvector normalizations.
-    """
+class ComputePosencStat(BaseTransform):
+    def __init__(self, pe_types, is_undirected, cfg):
+        self.pe_types = pe_types
+        self.is_undirected = is_undirected
+        self.cfg = cfg
 
-    EigVals = EigVals.unsqueeze(0)
-
-    if normalization == "L1":
-        # L1 normalization: eigvec / sum(abs(eigvec))
-        denom = EigVecs.norm(p=1, dim=0, keepdim=True)
-
-    elif normalization == "L2":
-        # L2 normalization: eigvec / sqrt(sum(eigvec^2))
-        denom = EigVecs.norm(p=2, dim=0, keepdim=True)
-
-    elif normalization == "abs-max":
-        # AbsMax normalization: eigvec / max|eigvec|
-        denom = torch.max(EigVecs.abs(), dim=0, keepdim=True).values
-
-    elif normalization == "wavelength":
-        # AbsMax normalization, followed by wavelength multiplication:
-        # eigvec * pi / (2 * max|eigvec| * sqrt(eigval))
-        denom = torch.max(EigVecs.abs(), dim=0, keepdim=True).values
-        eigval_denom = torch.sqrt(EigVals)
-        eigval_denom[EigVals < eps] = 1  # Problem with eigval = 0
-        denom = denom * eigval_denom * 2 / np.pi
-
-    elif normalization == "wavelength-asin":
-        # AbsMax normalization, followed by arcsin and wavelength multiplication:
-        # arcsin(eigvec / max|eigvec|)  /  sqrt(eigval)
-        denom_temp = torch.max(EigVecs.abs(), dim=0, keepdim=True).values.clamp_min(eps).expand_as(EigVecs)
-        EigVecs = torch.asin(EigVecs / denom_temp)
-        eigval_denom = torch.sqrt(EigVals)
-        eigval_denom[EigVals < eps] = 1  # Problem with eigval = 0
-        denom = eigval_denom
-
-    elif normalization == "wavelength-soft":
-        # AbsSoftmax normalization, followed by wavelength multiplication:
-        # eigvec / (softmax|eigvec| * sqrt(eigval))
-        denom = (F.softmax(EigVecs.abs(), dim=0) * EigVecs.abs()).sum(dim=0, keepdim=True)
-        eigval_denom = torch.sqrt(EigVals)
-        eigval_denom[EigVals < eps] = 1  # Problem with eigval = 0
-        denom = denom * eigval_denom
-
-    else:
-        raise ValueError(f"Unsupported normalization `{normalization}`")
-
-    denom = denom.clamp_min(eps).expand_as(EigVecs)
-    EigVecs = EigVecs / denom
-
-    return EigVecs
+    def __call__(self, data: Data) -> Data:
+        data = compute_posenc_stats(
+            data,
+            pe_types=self.pe_types,
+            is_undirected=self.is_undirected,
+            cfg=self.cfg,
+        )
+        return data
