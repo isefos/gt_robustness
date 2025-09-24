@@ -1,0 +1,271 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 6
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 32G
+    cpus-per-task: 2
+    time: 1-00:00
+    
+
+random:
+  samples: 3
+  seed: 6264
+
+  graphgym.seed:
+    seed: 7386
+    type: randint
+    min: 0
+    max: 10000
+
+grid:
+
+  graphgym.train.adv.num_replays: 
+    type: choice
+    options:
+      - 2
+      - 4
+      - 5
+      - 6
+    zip_id: epochs-replay
+
+  graphgym.optim.max_epoch:
+    type: choice
+    options:
+      - 150
+      - 75
+      - 60
+      - 50
+    zip_id: epochs-replay
+
+  graphgym.optim.num_warmup_epochs:
+    type: choice
+    options:
+      - 5
+      - 4
+      - 3
+      - 2
+    zip_id: epochs-replay
+
+  graphgym.optim.early_stopping_warmup:
+    type: choice
+    options:
+      - 15
+      - 8
+      - 7
+      - 6
+    zip_id: epochs-replay
+
+  graphgym.optim.early_stopping_patience:
+    type: choice
+    options:
+      - 20
+      - 15
+      - 10
+      - 8
+    zip_id: epochs-replay
+
+  graphgym.train.adv.e_budget:
+    type: choice
+    options:
+      - 0.05
+      - 0.1
+      - 0.15
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    benchmark: false
+    bn:
+      eps: 1.0e-05
+      mom: 0.1
+    custom_metrics: []
+    dataset:
+      cache_load: false
+      cache_save: false
+      dir: ./datasets
+      edge_dim: 128
+      edge_encoder: false
+      edge_encoder_bn: true
+      edge_encoder_name: Bond
+      edge_encoder_num_types: 0
+      edge_message_ratio: 0.8
+      edge_negative_sampling_ratio: 1.0
+      edge_train_mode: all
+      encoder: true
+      encoder_bn: true
+      encoder_dim: 128
+      encoder_name: db
+      format: PyG-UPFD
+      infer_link_label: None
+      label_column: none
+      label_table: none
+      location: local
+      name: politifact-bert
+      node_encoder: true
+      node_encoder_bn: false
+      node_encoder_name: LinearNode+WeightedGraphormerBias
+      node_encoder_num_types: 0
+      remove_feature: false
+      resample_disjoint: false
+      resample_negative: false
+      shuffle_split: true
+      slic_compactness: 10
+      split:
+      - 0.8
+      - 0.1
+      - 0.1
+      split_dir: ./splits
+      split_index: 0
+      split_mode: standard
+      task: graph
+      task_type: classification_binary
+      to_undirected: false
+      transductive: false
+      transform: none
+      tu_simple: true
+    devices: 1
+    example_arg: example
+    example_group:
+      example_arg: example
+    gnn:
+      act: relu
+      agg: add
+      att_final_linear: false
+      att_final_linear_bn: false
+      att_heads: 1
+      batchnorm: true
+      clear_feature: true
+      dim_inner: 40
+      dropout: 0.0
+      head: graphormer_graph
+      keep_edge: 0.5
+      l2norm: true
+      layer_type: generalconv
+      layers_mp: 2
+      layers_post_mp: 1
+      layers_pre_mp: 0
+      msg_direction: single
+      normalize_adj: false
+      residual: false
+      self_msg: concat
+      skip_every: 1
+      stage_type: stack
+    gpu_mem: false
+    graphormer:
+      attention_dropout: 0.0
+      dropout: 0.0
+      embed_dim: 40
+      input_dropout: 0.0
+      mlp_dropout: 0.0
+      num_heads: 8
+      num_layers: 6
+      use_graph_token: true
+    mem:
+      inplace: false
+    metric_agg: argmax
+    metric_best: accuracy
+    model:
+      edge_decoding: dot
+      graph_pooling: graph_token
+      loss_fun: cross_entropy
+      match_upper: true
+      size_average: mean
+      thresh: 0.5
+      type: Graphormer
+
+    attack:
+      enable: false
+      e_budget: 0.15
+      num_attacked_graphs: 30
+      skip_incorrect_graph_classification: true
+      log_progress: false
+      load_best_model: true
+      split: test
+      prediction_level: graph
+      remove_isolated_components: true
+      run_random_baseline: true
+      block_size: 1_000
+      epochs: 125
+      epochs_resampling: 100
+      resample_period: 1
+      max_final_samples: 20
+      eps: 1.0e-07
+      eps_init_noised: false
+      is_undirected: true
+      loss: raw_prediction
+      metric: null
+      lr: 4000
+      max_edge_weight_update: 0.0
+      max_trials_sampling: 20
+      minimum_budget: 1
+      node_prob_enable: true
+      node_prob_iterations: 3
+      node_prob_log: true
+      root_node_idx: 0
+      with_early_stopping: true
+      node_injection:
+        enable: true
+        from_train: true
+        from_val: true
+        from_test: true
+        allow_existing_graph_pert: false
+        sample_only_connected: true
+        include_root_nodes: false
+        sample_only_trees: true
+
+    train:
+      mode: adversarial
+      eval_period: 1
+      batch_size: 16
+      adv:
+        batched_train: False
+        block_size: 500
+        lr: 5000
+        # for val
+        block_size_val: 1000
+        epochs_val: 10
+        epochs_resampling_val: 7
+        lr_val: 4000
+        max_final_samples: 4
+        max_num_graphs_val: 100
+        early_stopping_adv: true
+        nia_include_train_in_val: true
+
+    optim:
+      base_lr: 0.0001291431389395534
+      batch_accumulation: 1
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      early_stopping: true
+      early_stopping_delta_e: 0.05
+      lr_decay: 0.1
+      min_lr: 0.0
+      momentum: 0.9
+      optimizer: adamW
+      reduce_factor: 0.1
+      schedule_patience: 10
+      scheduler: cosine_with_warmup
+      steps:
+      - 30
+      - 60
+      - 90
+      weight_decay: 0.0067022017097888706
+
+    posenc_GraphormerBias:
+      dim_pe: 0
+      directed_graphs: false
+      enable: true
+      has_edge_attr: false
+      node_degrees_only: false
+      num_in_degrees: 37
+      num_out_degrees: 37
+      num_spatial_types: 10

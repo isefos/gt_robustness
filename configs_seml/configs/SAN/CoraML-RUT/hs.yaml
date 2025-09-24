@@ -1,0 +1,199 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 1
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 4
+    time: 1-00:00
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-RobustnessUnitTest
+      name: cora_ml
+      task: node
+      task_type: classification
+      transductive: true
+      split_mode: standard
+      split_index: 0
+      node_encoder: true
+      node_encoder_name: WLapPE
+      node_encoder_bn: false
+      edge_encoder: true
+      edge_encoder_name: WeightedSANDummyEdge
+      edge_encoder_bn: false
+
+    posenc_WLapPE:
+      enable: true
+      model: Transformer
+      dim_pe: 0
+      eigen:
+        laplacian_norm: sym
+        eigvec_norm: L2
+      raw_norm_type: none
+      post_layers: 0
+      pass_as_var: false
+
+    train:
+      mode: custom
+      batch_size: 1
+      eval_period: 1
+      ckpt_best: true
+      enable_ckpt: true
+
+    model:
+      type: WeightedSANTransformer
+      loss_fun: cross_entropy
+
+    gt:
+      dim_hidden: 0  # determined using num_heads and dims_per_head
+      full_graph: true
+      gamma_learnable: false
+      layer_norm: false
+      batch_norm: true
+      residual: true
+      attn:
+        use_bias: false
+
+    gnn:
+      layers_pre_mp: 0
+      layers_post_mp: 1
+      head: node
+      dim_inner: 0  # determined using num_heads and dims_per_head
+    
+    optim:
+      optimizer: adam
+      max_epoch: 400
+      scheduler: reduce_on_plateau
+      reduce_factor: 0.5
+      schedule_patience: 15
+      clip_grad_norm: false
+      early_stopping: true
+      early_stopping_patience: 35
+      early_stopping_delta_e: 0.05
+      early_stopping_warmup: 30
+
+    attack:
+      enable: false
+
+# experiment random configs
+
+random:
+  samples: 300
+  seed: 187
+
+  graphgym.seed:
+    seed: 786
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.posenc_WLapPE.eigen.max_freqs:
+    seed: 99235
+    type: randint
+    min: 8
+    max: 140
+
+  graphgym.posenc_WLapPE.layers:
+    seed: 82
+    type: choice
+    options:
+      - 1
+      - 2
+
+  graphgym.posenc_WLapPE.n_heads:
+    seed: 235
+    type: randint
+    min: 2
+    max: 7
+
+  dims_per_head_PE:
+    seed: 6384
+    type: randint
+    min: 2
+    max: 6
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 4e-4
+    max: 3e-1
+
+  graphgym.optim.weight_decay:
+    seed: 89
+    type: loguniform
+    min: 1e-7
+    max: 1e-1
+
+  graphgym.gt.n_heads:
+    seed: 13094
+    type: randint
+    min: 4
+    max: 10
+
+  dims_per_head:
+    seed: 164
+    type: randint
+    min: 2
+    max: 10
+
+  graphgym.gt.layers:
+    seed: 357
+    type: randint
+    min: 2
+    max: 8
+
+  graphgym.gt.dropout:
+    seed: 751
+    type: uniform
+    min: 0.0
+    max: 0.2
+
+  graphgym.gt.wsan_add_dummy_edges:
+    seed: 3265
+    type: choice
+    options:
+      - true
+      - false
+
+  graphgym.gt.gamma:
+    seed: 982
+    type: loguniform
+    min: 1e-6
+    max: 1.0
+
+  graphgym.gt.attn.clamp:
+    seed: 6424
+    type: choice
+    options:
+      - null
+      - 5.0
+
+  graphgym.train.homophily_regularization: 
+    seed: 883
+    type: uniform
+    min: 0.0
+    max: 5.0
+
+  graphgym.train.homophily_regularization_gt_weight:
+    seed: 8462
+    type: uniform
+    min: 1.0
+    max: 10.0

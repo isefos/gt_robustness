@@ -1,0 +1,192 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 6
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 32G
+    cpus-per-task: 2
+    time: 1-00:00
+    
+
+grid:
+
+  graphgym.seed:
+    type: choice
+    options:
+      - 42
+      - 670
+      - 7813
+      - 9537
+
+  graphgym.attack.e_budget:
+    type: choice
+    options:
+      - 0.025
+      - 0.05
+      - 0.1
+      - 0.15
+      - 0.2
+      - 0.3
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    out_dir: configs_seml/results
+
+    pretrained:
+      dir: '/<your-saved-path>/models/Polynormer/ENZYMES/0'
+      finetune: false
+
+    attack:
+      enable: true
+      num_attacked_graphs: 50
+      skip_incorrect_graph_classification: false
+      log_progress: false
+      load_best_model: false
+      split: test
+      prediction_level: graph
+      remove_isolated_components: false
+      run_random_baseline: true
+      block_size: 6000
+      epochs: 125
+      epochs_resampling: 100
+      resample_period: 1
+      max_final_samples: 20
+      eps: 1.0e-07
+      eps_init_noised: false
+      is_undirected: true
+      loss: train
+      lr: 4000
+      max_edge_weight_update: 0.0
+      max_trials_sampling: 20
+      minimum_budget: 1
+      node_prob_enable: false
+      root_node_idx: null
+      with_early_stopping: true
+      cluster_sampling: false
+      node_injection:
+        enable: false
+  
+    # copied from pre-trained model
+    accelerator: cuda
+    bn:
+      eps: 1.0e-05
+      mom: 0.1
+    dataset:
+      cache_load: false
+      cache_save: false
+      dir: ./datasets
+      edge_dim: 128
+      edge_encoder: false
+      edge_encoder_bn: true
+      edge_encoder_name: Bond
+      edge_encoder_num_types: 0
+      edge_message_ratio: 0.8
+      edge_negative_sampling_ratio: 1.0
+      edge_train_mode: all
+      encoder: true
+      encoder_bn: true
+      encoder_dim: 128
+      encoder_name: db
+      format: PyG-TUDataset
+      infer_link_label: None
+      label_column: none
+      label_table: none
+      location: local
+      name: ENZYMES
+      node_encoder: true
+      node_encoder_bn: false
+      node_encoder_name: LinearNode
+      node_encoder_num_types: 0
+      pe_transform_on_the_fly: false
+      remove_feature: false
+      resample_disjoint: false
+      resample_negative: false
+      shuffle_split: true
+      slic_compactness: 10
+      split:
+      - 0.8
+      - 0.1
+      - 0.1
+      split_dir: ./splits
+      split_index: 0
+      split_mode: cv-stratifiedkfold-10
+      task: graph
+      task_type: classification
+      to_undirected: false
+      transductive: false
+      transform: none
+      tu_simple: true
+    gnn:
+      act: relu
+      agg: add
+      att_final_linear: false
+      att_final_linear_bn: false
+      att_heads: 8
+      batchnorm: true
+      clear_feature: true
+      dim_inner: 104
+      dropout: 0.02040165333735733
+      head: weighted_add_pool_graph
+      keep_edge: 0.5
+      l2norm: true
+      layer_type: generalconv
+      layers_mp: 6
+      layers_post_mp: 3
+      layers_pre_mp: 0
+      msg_direction: single
+      normalize_adj: false
+      residual: false
+      self_msg: concat
+      skip_every: 1
+      stage_type: stack
+    gt:
+      attn:
+        O_e: true
+        act: relu
+        clamp: 5.0
+        deg_scaler: true
+        edge_enhance: true
+        full_attn: true
+        norm_e: true
+        use_bias: false
+      attn_dropout: 0.0
+      batch_norm: true
+      bn_momentum: 0.1
+      bn_no_runner: false
+      dim_hidden: 104
+      dropout: 0.019401444339200314
+      full_graph: true
+      gamma: 1.0e-05
+      gamma_learnable: false
+      layer_norm: false
+      layer_type: SANLayer
+      layers: 2
+      n_heads: 8
+      pna_degrees: []
+      polynormer:
+        beta: -1.0
+        dropout_node_input: 0.0
+        local_pre_layer_norm: false
+        qk_shared: true
+      residual: true
+      update_e: true
+    metric_agg: argmax
+    metric_best: accuracy
+    model:
+      edge_decoding: dot
+      graph_pooling: add
+      loss_fun: cross_entropy
+      match_upper: true
+      size_average: mean
+      thresh: 0.5
+      type: WeightedPolynormer

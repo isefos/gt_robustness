@@ -1,0 +1,132 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 8
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 4
+    time: 1-00:00
+
+# experiment fixed configs 
+
+fixed:
+
+  graphgym:
+
+    accelerator: auto
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-RobustnessUnitTest
+      name: cora_ml
+      task: node
+      task_type: classification
+      transductive: true
+
+    train:
+      mode: custom
+      batch_size: 1
+      eval_period: 1
+      ckpt_best: true
+      enable_ckpt: true
+
+    model:
+      type: gnn
+      loss_fun: cross_entropy
+
+    gnn:
+      layers_pre_mp: 1
+      layer_type: gcnconvweighted
+      stage_type: stack
+      batchnorm: true
+      normalize_adj: false
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 200
+      scheduler: cosine_with_warmup
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_delta_e: 0.05
+      early_stopping_warmup: 30
+
+# experiment random configs
+
+random:
+  samples: 300
+  seed: 7352
+
+  graphgym.optim.base_lr:
+    seed: 1145
+    type: loguniform
+    min: 5e-5
+    max: 1e-1
+    
+  graphgym.optim.weight_decay:
+    seed: 3492
+    type: loguniform
+    min: 1e-8
+    max: 1e-2
+
+  graphgym.optim.num_warmup_epochs:
+    seed: 9963
+    type: randint
+    min: 5
+    max: 30
+
+  graphgym.gnn.layers_mp:
+    seed: 56992
+    type: choice
+    options:
+      - 1
+      - 2
+      - 3
+
+  graphgym.gnn.act:
+    seed: 3428
+    type: choice
+    options:
+      - relu
+      - prelu
+
+  graphgym.gnn.dropout:
+    seed: 43252
+    type: uniform
+    min: 0.0
+    max: 0.2
+
+  graphgym.gnn.layers_post_mp:
+    seed: 5582
+    type: choice
+    options:
+      - 1
+      - 2
+
+  graphgym.gnn.dim_inner:
+    seed: 2561
+    type: randint
+    min: 20
+    max: 300
+
+  graphgym.train.homophily_regularization:
+    seed: 2356
+    type: uniform
+    min: 0.0
+    max: 5.0
+
+  graphgym.train.homophily_regularization_gt_weight:
+    seed: 2156
+    type: uniform
+    min: 1.0
+    max: 10.0

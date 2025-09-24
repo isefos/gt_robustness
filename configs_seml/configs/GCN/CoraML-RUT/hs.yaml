@@ -1,0 +1,121 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 8
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 4
+    time: 1-00:00
+
+# experiment fixed configs 
+
+fixed:
+
+  graphgym:
+
+    accelerator: auto
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-RobustnessUnitTest
+      name: cora_ml
+      task: node
+      task_type: classification
+      transductive: true
+
+    train:
+      mode: custom
+      batch_size: 1
+      eval_period: 1
+      ckpt_best: true
+      enable_ckpt: true
+      homophily_regularization: 0.0
+
+    model:
+      type: gnn
+      loss_fun: cross_entropy
+
+    gnn:
+      layers_pre_mp: 1
+      layer_type: gcnconvweighted
+      stage_type: stack
+      batchnorm: true
+      normalize_adj: false
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 200
+      scheduler: cosine_with_warmup
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_delta_e: 0.05
+      early_stopping_warmup: 30
+
+# experiment random configs
+
+random:
+  samples: 300
+  seed: 46267
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 5e-5
+    max: 1e-1
+    
+  graphgym.optim.weight_decay:
+    seed: 1965
+    type: loguniform
+    min: 1e-8
+    max: 1e-2
+
+  graphgym.optim.num_warmup_epochs:
+    seed: 7529
+    type: randint
+    min: 5
+    max: 30
+
+  graphgym.gnn.layers_mp:
+    seed: 82694
+    type: choice
+    options:
+      - 1
+      - 2
+      - 3
+
+  graphgym.gnn.act:
+    seed: 752
+    type: choice
+    options:
+      - relu
+      - prelu
+
+  graphgym.gnn.dropout:
+    seed: 43
+    type: uniform
+    min: 0.0
+    max: 0.2
+
+  graphgym.gnn.layers_post_mp:
+    seed: 295
+    type: choice
+    options:
+      - 1
+      - 2
+
+  graphgym.gnn.dim_inner:
+    seed: 9265
+    type: randint
+    min: 20
+    max: 300

@@ -1,0 +1,134 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 6
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 1
+    time: 1-00:00
+
+# experiment fixed configs 
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-UPFD
+      name: politifact-bert
+      task: graph
+      task_type: classification_binary
+      transductive: false
+      split_mode: standard
+      node_encoder: true
+      node_encoder_name: LinearNode
+      node_encoder_bn: false
+
+    train:
+      mode: custom
+      eval_period: 1
+      # hyperparameter search, no need to save the models
+      enable_ckpt: false
+      batch_size: 16
+
+    model:
+      type: gnn
+      loss_fun: cross_entropy
+
+    gnn:
+      layer_type: gcnconvweighted
+      stage_type: stack
+      batchnorm: true
+      act: relu
+      dropout: 0.0
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 300
+      scheduler: cosine_with_warmup
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_delta_e: 0.04
+      early_stopping_warmup: 30
+
+    attack:
+      enable: false
+
+# experiment random configs
+
+random:
+  samples: 500
+  seed: 187
+
+  graphgym.seed:
+    seed: 786
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 4e-6
+    max: 1e-1
+
+  graphgym.optim.weight_decay:
+    seed: 89
+    type: loguniform
+    min: 1e-5
+    max: 1e-1
+
+  graphgym.gnn.dim_inner:
+    seed: 4275
+    type: randint
+    min: 16
+    max: 500
+
+  graphgym.gnn.layers_pre_mp:
+    seed: 6624
+    type: choice
+    options:
+      - 0
+      - 1
+
+  graphgym.gnn.layers_mp:
+    seed: 357
+    type: choice
+    options:
+      - 1
+      - 2
+
+  graphgym.gnn.head:
+    seed: 8792
+    type: choice
+    options:
+      - weighted_add_pool_graph
+      - weighted_mean_pool_graph
+  
+  graphgym.gnn.layers_post_mp:
+    seed: 96624
+    type: choice
+    options:
+      - 1
+      - 2
+      - 3
+
+  graphgym.optim.num_warmup_epochs:
+    seed: 3976
+    type: randint
+    min: 10
+    max: 40

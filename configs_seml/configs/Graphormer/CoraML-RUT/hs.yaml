@@ -1,0 +1,132 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 2
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 4
+    time: 1-00:00
+
+# experiment fixed configs 
+
+fixed:
+
+  dims_per_head: 10
+
+  graphgym:
+
+    accelerator: auto
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-RobustnessUnitTest
+      name: cora_ml
+      task: node
+      task_type: classification
+      transductive: true
+      split_mode: standard
+      split_index: 0
+      node_encoder: true
+      node_encoder_name: LinearNode+WeightedGraphormerBias
+      node_encoder_bn: false
+
+    posenc_GraphormerBias:
+      enable: true
+      node_degrees_only: false
+      num_spatial_types: 14  # cora_ml: max cont. = 19, max total = 19
+      num_out_degrees: ${config.graphgym.posenc_GraphormerBias.num_in_degrees}
+      directed_graphs: false
+      has_edge_attr: false
+       
+ 
+
+    train:
+      mode: custom
+      batch_size: 1
+      eval_period: 1
+      ckpt_best: true
+      enable_ckpt: true
+
+    model:
+      type: Graphormer
+      loss_fun: cross_entropy
+
+    graphormer:
+      use_graph_token: false
+      embed_dim: 0
+      num_heads: 4
+      num_layers: 8
+      dropout: 0.03
+      input_dropout: 0.15
+      mlp_dropout: 0.1
+
+    gnn:
+      dim_inner: 0
+      head: node
+      layers_pre_mp: 0
+      layers_post_mp: 1
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      weight_decay: 0.00008
+      max_epoch: 200
+      scheduler: cosine_with_warmup
+      num_warmup_epochs: 8
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_delta_e: 0.05
+      early_stopping_warmup: 30
+
+# experiment random configs
+
+random:
+  samples: 300
+  seed: 19725
+
+  graphgym.seed:
+    seed: 7
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 9e-3
+    max: 5e-2
+
+  # cora_ml: max cont. = 19, max total = 168
+  graphgym.posenc_GraphormerBias.num_in_degrees:
+    seed: 64735
+    type: randint
+    min: 8
+    max: 30
+  
+  graphgym.graphormer.attention_dropout:
+    seed: 43
+    type: uniform
+    min: 0.2
+    max: 0.5
+
+  graphgym.train.homophily_regularization: 
+    seed: 883
+    type: uniform
+    min: 0.0
+    max: 5.0
+
+  graphgym.train.homophily_regularization_gt_weight:
+    seed: 8462
+    type: uniform
+    min: 1.0
+    max: 10.0

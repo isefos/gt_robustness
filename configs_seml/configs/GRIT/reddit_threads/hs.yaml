@@ -1,0 +1,159 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 3
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 32G
+    cpus-per-task: 2
+    time: 1-00:00
+    
+
+# experiment random configs
+
+random:
+  samples: 30
+  seed: 523
+
+  graphgym.seed:
+    seed: 786
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.gnn.head:
+    seed: 693
+    type: choice
+    options:
+      - weighted_mean_pool_graph
+      - weighted_add_pool_graph
+
+  graphgym.optim.base_lr:
+    seed: 226
+    type: loguniform
+    min: 3e-5
+    max: 3e-3
+
+  graphgym.optim.weight_decay:
+    seed: 89
+    type: loguniform
+    min: 1e-8
+    max: 1e-3
+
+  dims_per_head:
+    seed: 164
+    type: randint
+    min: 3
+    max: 17
+
+  graphgym.gt.layers:
+    seed: 357
+    type: randint
+    min: 2
+    max: 13
+
+  graphgym.gt.dropout:
+    seed: 751
+    type: uniform
+    min: 0.0
+    max: 0.1
+
+  graphgym.gt.attn_dropout:
+    seed: 10075
+    type: uniform
+    min: 0.0
+    max: 0.6
+
+  graphgym.posenc_RRWP.ksteps:
+    seed: 392
+    type: randint
+    min: 3
+    max: 17
+
+  graphgym.gnn.layers_post_mp:
+    seed: 191
+    type: choice
+    options:
+      - 1
+      - 2
+
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-TUDataset
+      name: reddit_threads
+      task: graph
+      task_type: classification_binary
+      transductive: false
+      split_mode: cv-stratifiedkfold-8
+      split_index: 6
+      split_dir: datasets/splits
+      node_encoder: true
+      node_encoder_name: LinearNode+WeightedRRWPLinear
+      node_encoder_bn: false
+      edge_encoder: false
+
+    train:
+      mode: custom
+      eval_period: 1
+      enable_ckpt: true
+      batch_size: 64  # very small graphs
+
+    posenc_RRWP:
+      enable: true
+      w_add_dummy_edge: false
+
+    model:
+      type: GritTransformer
+      loss_fun: cross_entropy
+
+    gt:
+      n_heads: 8
+      dim_hidden: 0  # determined using num_heads and dims_per_head
+      layer_norm: false
+      batch_norm: true
+      update_e: true
+      attn:
+        deg_scaler: true
+        use_bias: false
+        clamp: 5.
+        act: relu
+        full_attn: true
+        norm_e: true
+        O_e: true
+        edge_enhance: true
+
+    gnn:
+      layers_pre_mp: 0
+      dim_inner: 0  # determined using num_heads and dims_per_head
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 30
+      scheduler: cosine_with_warmup
+      early_stopping: true
+      early_stopping_patience: 7
+      early_stopping_delta_e: 0.01
+      early_stopping_warmup: 3
+      num_warmup_epochs: 1
+
+    attack:
+      enable: false

@@ -1,0 +1,183 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 2
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 36G
+    cpus-per-task: 2
+    time: 1-00:00
+    
+
+# experiment random configs
+
+random:
+  samples: 30
+  seed: 6219
+
+  graphgym.seed:
+    seed: 6776
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 4.0e-6
+    max: 5.0e-1
+
+  graphgym.optim.weight_decay:
+    seed: 89
+    type: loguniform
+    min: 1.0e-8
+    max: 1.0e-2
+
+  dims_per_head:
+    seed: 164
+    type: randint
+    min: 5
+    max: 13
+
+  graphgym.gt.layers:
+    seed: 357
+    type: randint
+    min: 2
+    max: 17
+
+  graphgym.gt.dropout:
+    seed: 751
+    type: uniform
+    min: 0.0
+    max: 0.1
+
+  graphgym.posenc_WLapPE.w_add_dummy_edge:
+    seed: 3265
+    type: choice
+    options:
+      - true
+      - false
+
+  graphgym.gt.gamma:
+    seed: 982
+    type: loguniform
+    min: 3.0e-5
+    max: 3.0e-1
+
+  graphgym.posenc_WLapPE.layers:
+    seed: 51
+    type: choice
+    options:
+      - 1
+      - 2
+
+  dims_per_head_PE:
+    seed: 6384
+    type: randint
+    min: 1
+    max: 4
+
+  graphgym.posenc_WLapPE.eigen.max_freqs:
+    seed: 52157
+    type: randint
+    min: 5
+    max: 20
+
+  graphgym.gnn.head:
+    seed: 82
+    type: choice
+    options:
+      - weighted_add_pool_graph
+      - weighted_mean_pool_graph
+
+  graphgym.gnn.layers_post_mp:
+    seed: 5112
+    type: choice
+    options:
+      - 1
+      - 2
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-TUDataset
+      name: reddit_threads
+      task: graph
+      task_type: classification_binary
+      transductive: false
+      split_mode: cv-stratifiedkfold-8
+      split_index: 6
+      split_dir: datasets/splits
+      node_encoder: true
+      node_encoder_name: WLapPE
+      node_encoder_bn: false
+      edge_encoder: true
+      edge_encoder_bn: false
+      edge_encoder_name: WeightedSANDummyEdge
+
+    train:
+      mode: custom
+      eval_period: 1
+      enable_ckpt: true
+      batch_size: 64  # very small graphs
+
+    posenc_WLapPE:
+      enable: true
+      eigen:
+        laplacian_norm: sym
+        eigvec_norm: L2
+      model: Transformer
+      n_heads: 8
+      dim_pe: 0  # determined by heads and dim per head
+      raw_norm_type: none
+      post_layers: 0
+      pass_as_var: false
+
+    model:
+      type: WeightedSANTransformer
+      loss_fun: cross_entropy
+
+    gt:
+      n_heads: 8
+      dim_hidden: 0  # determined using num_heads and dims_per_head
+      full_graph: true
+      gamma_learnable: false
+      layer_norm: false
+      batch_norm: true
+      residual: true
+      attn:
+        use_bias: false
+        clamp: 5.0
+
+    gnn:
+      layers_pre_mp: 0
+      dim_inner: 0  # determined using num_heads and dims_per_head
+    
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 30
+      scheduler: cosine_with_warmup
+      early_stopping: true
+      early_stopping_patience: 7
+      early_stopping_delta_e: 0.05
+      early_stopping_warmup: 3
+      num_warmup_epochs: 1
+
+    attack:
+      enable: false

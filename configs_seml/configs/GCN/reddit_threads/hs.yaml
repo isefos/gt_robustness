@@ -1,0 +1,129 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 16
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 40G
+    cpus-per-task: 2
+    time: 1-00:00
+    
+
+# experiment fixed configs 
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-TUDataset
+      name: reddit_threads
+      task: graph
+      task_type: classification_binary
+      transductive: false
+      split_mode: cv-stratifiedkfold-8
+      split_index: 6
+      split_dir: datasets/splits
+      node_encoder: true
+      node_encoder_name: LinearNode
+      node_encoder_bn: false
+      edge_encoder: false
+
+    train:
+      mode: custom
+      eval_period: 1
+      enable_ckpt: true
+      batch_size: 256  # very small graphs
+
+    model:
+      type: gnn
+      loss_fun: cross_entropy
+
+    gnn:
+      layer_type: gcnconvweighted
+      stage_type: stack
+      batchnorm: true
+      act: relu
+      layers_pre_mp: 0
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 300
+      scheduler: cosine_with_warmup
+      early_stopping: true
+      early_stopping_patience: 40
+      early_stopping_delta_e: 0.05
+      early_stopping_warmup: 25
+      num_warmup_epochs: 10
+
+    attack:
+      enable: false
+
+# experiment random configs
+
+random:
+  samples: 160
+  seed: 187
+
+  graphgym.seed:
+    seed: 786
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 4e-6
+    max: 1e-1
+
+  graphgym.optim.weight_decay:
+    seed: 89
+    type: loguniform
+    min: 1e-8
+    max: 1e-1
+
+  graphgym.gnn.dim_inner:
+    seed: 4275
+    type: randint
+    min: 16
+    max: 500
+
+  graphgym.gnn.layers_mp:
+    seed: 462
+    type: randint
+    min: 2
+    max: 11
+
+  graphgym.gnn.head:
+    seed: 8792
+    type: choice
+    options:
+      - weighted_add_pool_graph
+      - weighted_mean_pool_graph
+  
+  graphgym.gnn.layers_post_mp:
+    seed: 96624
+    type: choice
+    options:
+      - 1
+      - 2
+
+  graphgym.gnn.dropout:
+    seed: 45289
+    type: uniform
+    min: 0.0
+    max: 0.15

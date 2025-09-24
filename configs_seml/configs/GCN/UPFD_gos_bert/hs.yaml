@@ -1,0 +1,148 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 8
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 32G
+    cpus-per-task: 1
+    time: 1-00:00
+
+# experiment random configs
+
+random:
+  samples: 100
+  seed: 187
+
+  graphgym.seed:
+    seed: 786
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 3e-5
+    max: 2e-2
+
+  graphgym.optim.weight_decay:
+    seed: 89
+    type: loguniform
+    min: 1e-8
+    max: 1e-1
+
+  graphgym.gnn.dropout:
+    seed: 42312
+    type: choice
+    options:
+      - 0.0
+      - 0.5
+      - 0.1
+
+  graphgym.gnn.act:
+    seed: 12
+    type: choice
+    options:
+      - relu
+      - prelu
+
+  graphgym.gnn.stage_type:
+    seed: 8361
+    type: choice
+    options:
+      - stack
+      - skipsum
+
+  graphgym.gnn.dim_inner:
+    seed: 4275
+    type: randint
+    min: 40
+    max: 400
+
+  graphgym.gnn.layers_pre_mp:
+    seed: 886
+    type: choice
+    options:
+      - 0
+      - 1
+
+  graphgym.gnn.layers_mp:
+    seed: 357
+    type: choice
+    options:
+      - 1
+      - 2
+      - 3
+      - 4
+
+  graphgym.gnn.head:
+    seed: 8792
+    type: choice
+    options:
+      - weighted_add_pool_graph
+      - weighted_mean_pool_graph
+  
+  graphgym.gnn.layers_post_mp:
+    seed: 96624
+    type: choice
+    options:
+      - 1
+      - 2
+      - 3
+
+
+# experiment fixed configs 
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-UPFD
+      name: gossipcop-bert
+      task: graph
+      task_type: classification_binary
+      transductive: false
+      split_mode: standard
+      node_encoder: true
+      node_encoder_name: LinearNode
+      node_encoder_bn: false
+
+    train:
+      mode: custom
+      batch_size: 16
+
+    model:
+      type: gnn
+      loss_fun: cross_entropy
+
+    gnn:
+      layer_type: gcnconvweighted
+      batchnorm: true
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 100
+      scheduler: cosine_with_warmup
+      num_warmup_epochs: 5
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_delta_e: 0.01
+      early_stopping_warmup: 15
+
+    attack:
+      enable: false

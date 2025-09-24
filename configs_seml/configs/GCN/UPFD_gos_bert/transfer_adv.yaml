@@ -1,0 +1,156 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 2
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 24G
+    cpus-per-task: 2
+    time: 1-00:00
+    
+
+grid:
+
+  graphgym.pretrained.dir:
+    type: choice
+    options:
+      - '/<your-saved-path>/models/GCN/UPFD_gos_bert/adv/11'  # b: 0.05, k: 4
+      - '/<your-saved-path>/models/GCN/UPFD_gos_bert/adv/19'  # b: 0.05, k: 5
+      - '/<your-saved-path>/models/GCN/UPFD_gos_bert/adv/28'  # b: 0.05, k: 6
+      - '/<your-saved-path>/models/GCN/UPFD_gos_bert/adv/15'  # b: 0.10, k: 4
+      - '/<your-saved-path>/models/GCN/UPFD_gos_bert/adv/25'  # b: 0.15, k: 5
+
+  graphgym.attack.transfer.perturbation_path:
+    type: choice
+    options:
+      - '/<your-saved-path>/perturbations/UPFD_gos_bert/GRIT'
+      - '/<your-saved-path>/perturbations/UPFD_gos_bert/SAN'
+      - '/<your-saved-path>/perturbations/UPFD_gos_bert/GCN'
+      - '/<your-saved-path>/perturbations/UPFD_gos_bert/Graphormer'
+      - '/<your-saved-path>/perturbations/UPFD_gos_bert/GPS'
+      - '/<your-saved-path>/perturbations/UPFD_gos_bert/Polynormer'
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    seed: 15
+
+    out_dir: configs_seml/results
+
+    pretrained:
+      finetune: false
+
+    attack:
+      transfer:
+        enable: true
+      enable: true
+      num_attacked_graphs: 0
+      skip_incorrect_graph_classification: false
+      log_progress: false
+      load_best_model: false
+      split: test
+      prediction_level: graph
+      remove_isolated_components: true
+      run_random_baseline: false
+      is_undirected: true
+      root_node_idx: 0
+      node_injection:
+        enable: true
+        from_train: true
+        from_val: true
+        from_test: true
+        allow_existing_graph_pert: false
+        include_root_nodes: false
+        sample_only_trees: true
+
+    # copied from pre-trained model
+    accelerator: cuda
+    bn:
+      eps: 1.0e-05
+      mom: 0.1
+    dataset:
+      cache_load: false
+      cache_save: false
+      dir: ./datasets
+      edge_dim: 128
+      edge_encoder: false
+      edge_encoder_bn: true
+      edge_encoder_name: Bond
+      edge_encoder_num_types: 0
+      edge_message_ratio: 0.8
+      edge_negative_sampling_ratio: 1.0
+      edge_train_mode: all
+      encoder: true
+      encoder_bn: true
+      encoder_dim: 128
+      encoder_name: db
+      format: PyG-UPFD
+      infer_link_label: null
+      label_column: none
+      label_table: none
+      location: local
+      name: gossipcop-bert
+      node_encoder: true
+      node_encoder_bn: false
+      node_encoder_name: LinearNode
+      node_encoder_num_types: 0
+      pe_transform_on_the_fly: false
+      remove_feature: false
+      resample_disjoint: false
+      resample_negative: false
+      shuffle_split: true
+      slic_compactness: 10
+      split:
+      - 0.8
+      - 0.1
+      - 0.1
+      split_dir: ./splits
+      split_index: 0
+      split_mode: standard
+      task: graph
+      task_type: classification_binary
+      to_undirected: false
+      transductive: false
+      transform: none
+      tu_simple: true
+    gnn:
+      act: prelu
+      agg: add
+      att_final_linear: false
+      att_final_linear_bn: false
+      att_heads: 1
+      batchnorm: true
+      clear_feature: true
+      dim_inner: 105
+      dropout: 0.5
+      head: weighted_add_pool_graph
+      keep_edge: 0.5
+      l2norm: true
+      layer_type: gcnconvweighted
+      layers_mp: 3
+      layers_post_mp: 3
+      layers_pre_mp: 1
+      msg_direction: single
+      normalize_adj: false
+      residual: false
+      self_msg: concat
+      skip_every: 1
+      stage_type: skipsum
+    metric_agg: argmax
+    metric_best: accuracy
+    model:
+      edge_decoding: dot
+      graph_pooling: add
+      loss_fun: cross_entropy
+      match_upper: true
+      size_average: mean
+      thresh: 0.5
+      type: gnn

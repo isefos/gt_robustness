@@ -1,16 +1,19 @@
 import unittest as ut
-
 import networkx as nx
 import numpy as np
 import torch
-from torch_geometric.utils import to_scipy_sparse_matrix, get_laplacian, \
-    from_networkx
-
-from graphgps.transform.posenc_stats import (eigvec_normalizer,
-                                             get_heat_kernels,
-                                             get_heat_kernels_diag,
-                                             get_rw_landing_probs,
-                                             get_electrostatic_function_encoding)
+from torch_geometric.utils import (
+    to_scipy_sparse_matrix,
+    get_laplacian,
+    from_networkx,
+)
+from graphgps.transform.posenc_stats import (
+    get_heat_kernels,
+    get_heat_kernels_diag,
+    get_rw_landing_probs,
+    get_electrostatic_function_encoding,
+)
+from graphgps.transform.lap_eig import eigvec_normalizer
 
 
 def _get_linear_graph_edges(N):

@@ -1,0 +1,126 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 16
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 32G
+    cpus-per-task: 16
+    time: 1-00:00
+
+# Hyperparameter search
+
+random:
+  samples: 100
+  seed: 3783
+
+  graphgym.seed:
+    seed: 1828
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.optim.base_lr:
+    seed: 5613
+    type: loguniform
+    min: 1.0e-4
+    max: 1.0e-2
+
+  dims_per_head:
+    seed: 514
+    type: randint
+    min: 5
+    max: 11
+
+  graphgym.gnn.dropout:
+    seed: 653
+    type: uniform
+    min: 0.05
+    max: 0.15
+
+  graphgym.gnn.layers_mp:
+    seed: 672
+    type: randint
+    min: 10
+    max: 17
+
+  graphgym.gt.layers:
+    seed: 7625
+    type: randint
+    min: 2
+    max: 5
+
+  graphgym.gnn.layers_post_mp:
+    seed: 5112
+    type: choice
+    options:
+      - 1
+      - 2
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-UPFD
+      name: gossipcop-bert
+      task: graph
+      task_type: classification_binary
+      transductive: false
+      split_mode: standard
+      node_encoder: true
+      node_encoder_name: LinearNode
+      node_encoder_bn: false
+
+    train:
+      mode: custom
+      eval_period: 1
+      batch_size: 16
+
+    model:
+      type: WeightedPolynormer
+      loss_fun: cross_entropy
+
+    gt:
+      dim_hidden: 0  # determined using num_heads and dims_per_head
+      n_heads: 8
+      dropout: 0.05
+      polynormer:
+        dropout_node_input: 0.0
+        local_pre_layer_norm: false
+        beta: -1.0
+        qk_shared: true
+
+    gnn:
+      head: weighted_add_pool_graph
+      layers_pre_mp: 0
+      dim_inner: 0  # determined using num_heads and dims_per_head
+      att_heads: 8
+
+    optim:
+      optimizer: adamW
+      weight_decay: 1.0e-7
+      max_epoch: 120
+      num_local_epochs: 10
+      scheduler: cosine_with_warmup
+      num_warmup_epochs: 5
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_delta_e: 0.03
+      early_stopping_warmup: 15
+
+    attack:
+      enable: false

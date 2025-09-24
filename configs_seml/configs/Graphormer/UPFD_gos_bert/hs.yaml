@@ -1,0 +1,162 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 3
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 1
+    time: 1-00:00
+
+
+# experiment random configs
+
+random:
+  samples: 30
+  seed: 199
+
+  graphgym.seed:
+    seed: 78654
+    type: randint
+    min: 0
+    max: 10000
+
+  graphgym.optim.base_lr:
+    seed: 2264
+    type: loguniform
+    min: 8.0e-5
+    max: 8.0e-3
+
+  graphgym.optim.weight_decay:
+    seed: 89
+    type: loguniform
+    min: 1.0e-7
+    max: 1.0e-4
+
+  dims_per_head:
+    seed: 13094
+    type: randint
+    min: 2
+    max: 13
+
+  graphgym.graphormer.num_heads:
+    seed: 772
+    type: randint
+    min: 2
+    max: 9
+
+  graphgym.graphormer.num_layers:
+    seed: 357
+    type: randint
+    min: 2
+    max: 13
+
+  graphgym.graphormer.dropout:
+    seed: 961
+    type: uniform
+    min: 0.0
+    max: 0.1
+  
+  graphgym.graphormer.attention_dropout:
+    seed: 661
+    type: uniform
+    min: 0.35
+    max: 0.5
+
+  graphgym.graphormer.mlp_dropout:
+    seed: 241
+    type: uniform
+    min: 0.0
+    max: 0.06
+
+  graphgym.graphormer.input_dropout:
+    seed: 1153
+    type: uniform
+    min: 0.0
+    max: 0.13
+
+  graphgym.posenc_GraphormerBias.num_in_degrees:
+    seed: 647
+    type: randint
+    min: 10
+    max: 93
+
+  graphgym.posenc_GraphormerBias.num_spatial_types:
+    seed: 5113
+    type: randint
+    min: 4
+    max: 12
+
+
+# experiment fixed configs 
+
+fixed:
+
+  graphgym:
+
+    accelerator: cuda
+    out_dir: configs_seml/results
+    metric_best: accuracy
+    metric_agg: argmax
+    tensorboard_each_run: false
+
+    dataset:
+      format: PyG-UPFD
+      name: gossipcop-bert
+      task: graph
+      task_type: classification_binary
+      transductive: false
+      split_mode: standard
+      node_encoder: true
+      node_encoder_name: LinearNode+WeightedGraphormerBias
+      node_encoder_bn: false
+
+    posenc_GraphormerBias:
+      enable: true
+      node_degrees_only: false
+      directed_graphs: false
+      has_edge_attr: false
+      num_out_degrees: ${config.graphgym.posenc_GraphormerBias.num_in_degrees}
+      # next 2 only matter for attack, set to fixed false
+       
+ 
+
+    train:
+      mode: custom
+      batch_size: 16
+      eval_period: 1
+      enable_ckpt: true
+
+    model:
+      type: Graphormer
+      loss_fun: cross_entropy
+      graph_pooling: graph_token
+
+    graphormer:
+      embed_dim: 0  # determined using num_heads and dims_per_head
+
+    gnn:
+      layers_pre_mp: 0
+      layers_post_mp: 1
+      head: graphormer_graph
+      dim_inner: 0 # determined using num_heads and dims_per_head
+
+    optim:
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      optimizer: adamW
+      max_epoch: 100
+      scheduler: cosine_with_warmup
+      num_warmup_epochs: 5
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_delta_e: 0.01
+      early_stopping_warmup: 30
+
+    attack:
+      enable: false

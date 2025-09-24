@@ -1,0 +1,164 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 3
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 2
+    time: 1-00:00
+    
+
+grid:
+
+  graphgym.attack.transfer.perturbation_path:
+    type: choice
+    options:
+      - '/<your-saved-path>/perturbations/reddit_threads/GRIT'
+      - '/<your-saved-path>/perturbations/reddit_threads/SAN'
+      - '/<your-saved-path>/perturbations/reddit_threads/GCN'
+      - '/<your-saved-path>/perturbations/reddit_threads/Graphormer'
+      - '/<your-saved-path>/perturbations/reddit_threads/GPS'
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    seed: 15
+
+    out_dir: configs_seml/results
+
+    pretrained:
+      dir: '/<your-saved-path>/models/GCN/reddit_threads/0'
+      finetune: false
+
+    attack:
+      transfer:
+        enable: true
+      enable: true
+      num_attacked_graphs: 0
+      skip_incorrect_graph_classification: false
+      log_progress: false
+      load_best_model: false
+      split: test
+      prediction_level: graph
+      remove_isolated_components: false
+      run_random_baseline: false
+      is_undirected: true
+      node_injection:
+        enable: false
+
+    # copied from pre-trained model
+    accelerator: cuda
+    bn:
+      eps: 1.0e-05
+      mom: 0.1
+    dataset:
+      cache_load: false
+      cache_save: false
+      dir: ./datasets
+      edge_dim: 128
+      edge_encoder: false
+      edge_encoder_bn: true
+      edge_encoder_name: Bond
+      edge_encoder_num_types: 0
+      edge_message_ratio: 0.8
+      edge_negative_sampling_ratio: 1.0
+      edge_train_mode: all
+      encoder: true
+      encoder_bn: true
+      encoder_dim: 128
+      encoder_name: db
+      format: PyG-TUDataset
+      infer_link_label: None
+      label_column: none
+      label_table: none
+      location: local
+      name: reddit_threads
+      node_encoder: true
+      node_encoder_bn: false
+      node_encoder_name: LinearNode
+      node_encoder_num_types: 0
+      pe_transform_on_the_fly: false
+      remove_feature: false
+      resample_disjoint: false
+      resample_negative: false
+      shuffle_split: true
+      slic_compactness: 10
+      split:
+      - 0.8
+      - 0.1
+      - 0.1
+      split_dir: datasets/splits
+      split_index: 6
+      split_mode: cv-stratifiedkfold-8
+      task: graph
+      task_type: classification_binary
+      to_undirected: false
+      transductive: false
+      transform: none
+      tu_simple: true
+    gnn:
+      act: relu
+      agg: add
+      att_final_linear: false
+      att_final_linear_bn: false
+      att_heads: 1
+      batchnorm: true
+      clear_feature: true
+      dim_inner: 30
+      dropout: 0.003821353515146708
+      head: weighted_mean_pool_graph
+      keep_edge: 0.5
+      l2norm: true
+      layer_type: gcnconvweighted
+      layers_mp: 8
+      layers_post_mp: 2
+      layers_pre_mp: 0
+      msg_direction: single
+      normalize_adj: false
+      residual: false
+      self_msg: concat
+      skip_every: 1
+      stage_type: stack
+    metric_agg: argmax
+    metric_best: accuracy
+    model:
+      edge_decoding: dot
+      graph_pooling: add
+      loss_fun: cross_entropy
+      match_upper: true
+      size_average: mean
+      thresh: 0.5
+      type: gnn
+    optim:
+      base_lr: 0.0031736892010920453
+      batch_accumulation: 1
+      clip_grad_norm: true
+      clip_grad_norm_value: 5.0
+      early_stopping: true
+      early_stopping_delta_e: 0.05
+      early_stopping_patience: 40
+      early_stopping_warmup: 25
+      lr_decay: 0.1
+      max_epoch: 300
+      min_lr: 0.0
+      momentum: 0.9
+      num_local_epochs: 0
+      num_warmup_epochs: 10
+      optimizer: adamW
+      reduce_factor: 0.1
+      schedule_patience: 10
+      scheduler: cosine_with_warmup
+      steps:
+      - 30
+      - 60
+      - 90
+      weight_decay: 2.7047836302183376e-06

@@ -1,0 +1,82 @@
+seml:
+  executable: main.py
+  output_dir: configs_seml/logs
+  project_root_dir: ../../../..
+  conda_environment: gtr
+
+slurm:
+  experiments_per_job: 10
+  sbatch_options:
+    partition: <slurm-gpu-partition>
+    gres: gpu:1
+    mem: 16G
+    cpus-per-task: 4
+    time: 1-00:00
+
+grid:
+
+  graphgym.attack.e_budget:
+    type: range
+    min: 0.0075
+    max: 0.151
+    step: 0.0075
+
+  graphgym.dataset.split_index:
+    type: choice
+    options:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+
+# experiment fixed configs
+
+fixed:
+
+  graphgym:
+
+    seed: 42
+
+    out_dir: configs_seml/results
+
+    pretrained:
+      dir: '/<your-saved-path>/models/GCN/CoraML-RUT/${graphgym.dataset.split_index}'
+      finetune: false
+
+    robustness_unit_test:
+      enable: false
+
+    attack:
+      enable: true
+      num_attacked_graphs: 50
+      skip_incorrect_graph_classification: false
+      log_progress: false
+      load_best_model: false
+      split: test
+      prediction_level: node
+      remove_isolated_components: false
+      run_random_baseline: true
+      block_size: 20_000
+      epochs: 125
+      epochs_resampling: 100
+      resample_period: 1
+      max_final_samples: 20
+      eps: 1.0e-07
+      eps_init_noised: false
+      is_undirected: true
+      loss: tanh_margin
+      metric: neg_accuracy
+      lr: 4000
+      max_edge_weight_update: 0.0
+      max_trials_sampling: 20
+      minimum_budget: 1
+      node_prob_enable: false
+      root_node_idx: null
+      with_early_stopping: true
+      node_injection:
+        enable: false
+
+    # copied from config of model that gets loaded  # TODO: get the correct configs
+
+    
